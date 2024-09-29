@@ -12,6 +12,38 @@ print(os.path.curdir)
 features = ['energy', 'acousticness', 'valence', 'tempo', 'speechiness', 'instrumentalness']
 feature_weights = {'energy': 1.0, 'acousticness': 5.0, 'valence': 5.0, 'tempo': 5.0, 'instrumentalness': 5.0, 'speechiness': 5.0}
 
+@recommendation_bp.route('/initial', methods=['POST'])
+def get_initial_recommendations():
+    """
+    Endpoint to get initial recommendations when no feedback is provided yet.
+    Accepts user_id.
+    """
+    data = request.json
+    user_id = data.get('user_id')
+
+    if not user_id:
+        return jsonify({"error": "Invalid request, missing user_id"}), 400
+
+    # Fetch the initial recommendations based on user's mood or general recommendations
+    initial_recommendations = fetch_user_history_and_recommend(user_id, df_scaled, features, feature_weights)
+
+    # Truncate the recommendations to include only necessary fields
+    truncated_recommendations = [
+        {
+            'song_id': rec['song_id'],
+            'track_id': rec['track_id'],
+            'track_name': rec['track_name'],
+            'artist_name': rec['artist_name'],
+            'album_name': rec['album_name']
+        } 
+        for rec in initial_recommendations.to_dict(orient='records')
+    ]
+
+    return jsonify({
+        "initial_recommendations": truncated_recommendations
+    })
+
+
 @recommendation_bp.route('/refresh', methods=['POST'])
 def refresh_recommendations():
     """
@@ -20,7 +52,7 @@ def refresh_recommendations():
     """
     data = request.json
     user_id = data.get('user_id')
-    feedback = data.get('feedback')  # List of {'song_id': ..., 'liked': 1/-1, 'mood': 'Happy'}
+    feedback = data.get('feedback')  # List of {'song_id': ..., 'reward': 1/-1, 'mood': 'Calm'}
 
     if not user_id or not feedback:
         return jsonify({"error": "Invalid request"}), 400
@@ -31,11 +63,23 @@ def refresh_recommendations():
     # Fetch the new recommendations based on user history and feedback
     new_recommendations = fetch_user_history_and_recommend(user_id, df_scaled, features, feature_weights)
 
-    # Initiate background training for DQN based on updated feedback
-    run_background_training(user_id, df_scaled, features, feature_weights)
+    # Truncate the recommendations to include only necessary fields (similar to /initial)
+    truncated_recommendations = [
+        {
+            'song_id': rec['song_id'],
+            'track_id': rec['track_id'],
+            'track_name': rec['track_name'],
+            'artist_name': rec['artist_name'],
+            'album_name': rec['album_name']
+        }
+        for rec in new_recommendations.to_dict(orient='records')
+    ]
 
-    # Return the new recommendations to the frontend immediately
-    return jsonify({"new_recommendations": new_recommendations.to_dict(orient='records')})
+    # Return the new truncated recommendations
+    return jsonify({
+        "new_recommendations": truncated_recommendations
+    })
+
 
 @recommendation_bp.route('/update_mood', methods=['POST'])
 def update_user_mood_and_recommend():

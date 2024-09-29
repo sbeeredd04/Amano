@@ -51,37 +51,34 @@ def preprocess_data(df):
 # Helper Function to Get User's Songs from Database and Initialize Playlist
 def get_user_playlist_from_db(user_id, df_scaled):
     """
-    Fetch the user's liked/disliked songs from the UserHistory table and initialize a playlist by looking up the songs in the dataset.
+    Fetch the user's liked songs (reward = 1) from the UserHistory table and initialize a playlist by looking up the songs in the dataset.
     """
     session = get_session()
     with session:
-        statement = select(UserHistory).filter_by(user_id=user_id)
+        statement = select(UserHistory).filter_by(user_id=user_id, reward=1)  # Only select liked songs (reward=1)
         user_history = session.scalars(statement).all()
 
     # Initialize user playlist based on the song_id from the dataset
     user_playlist = []
     for record in user_history:
-        song_record = df_scaled[
-            (df_scaled['track_id'] == record.song_id) |
-            (df_scaled['track_name'].str.contains(record.song_id, case=False))
-        ]
+        song_record = df_scaled[df_scaled['song_id'] == record.song_id]
         if not song_record.empty:
             user_playlist.append(song_record['song_id'].values[0])
     
     return user_playlist, len(user_history)
 
-# Helper Function to Update User Feedback in Database
+
 def update_user_feedback(user_id, feedback):
     """
-    Updates the user's feedback (like/dislike) for songs in the UserHistory table.
+    Updates the user's feedback (reward) for songs in the UserHistory table.
     :param user_id: The user's ID
-    :param feedback: A list of song feedback, each containing song_id, liked (1 or -1), and mood
+    :param feedback: A list of song feedback, each containing song_id, reward (1 or -1), and mood
     """
     session = get_session()
     with session:
         for item in feedback:
             song_id = item['song_id']
-            liked = item['liked']
+            reward = item['reward']  # Use 'reward' instead of 'liked'
             mood = item['mood']
 
             # Check if the song already exists in the history
@@ -89,11 +86,11 @@ def update_user_feedback(user_id, feedback):
 
             if existing_record:
                 # Update existing record
-                existing_record.liked = liked
+                existing_record.reward = reward  # Update 'reward'
                 existing_record.mood = mood
             else:
                 # Insert a new record
-                new_history = UserHistory(user_id=user_id, song_id=song_id, liked=liked, mood=mood)
+                new_history = UserHistory(user_id=user_id, song_id=song_id, reward=reward, mood=mood)
                 session.add(new_history)
         
         session.commit()
@@ -117,6 +114,10 @@ def recommend_songs_filtered(user_songs, df, features, feature_weights, top_n=0)
     
     if top_n > 0:
         recommendations = recommendations.head(top_n)
+    
+    recommendations = pd.concat([recommendations, user_songs_df])
+
+    
     return recommendations
 
 # Function to Fetch User Interaction History and Generate Immediate Recommendations
