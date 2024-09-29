@@ -34,3 +34,18 @@ class UserHistory(Base):
             'reward': self.reward,
             'mood': self.mood  # No need to use pickle anymore for string moods
         }
+
+class UserMood(Base):
+    __tablename__ = 'user_mood'
+
+    user_id = Column(Integer, primary_key=True)
+    mood = Column(String(20))  # Stores the mood as a string (e.g., 'Happy', 'Sad', etc.)
+
+    def __repr__(self):
+        return f"<UserMood(user_id={self.user_id}, mood={self.mood})>"
+
+    def serialize(self):
+        return {
+            'user_id': self.user_id,
+            'mood': self.mood
+        }

@@ -8,8 +8,7 @@ import random
 from collections import deque
 import numpy as np
 from sqlalchemy import select
-from models.song_model import Song, UserHistory
-from models.mood_model import UserMood  # Assuming you have a model for UserMood
+from models.song_model import Song, UserHistory, UserMood
 from utils.db import get_session
 import threading
 
