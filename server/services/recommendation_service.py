@@ -16,6 +16,12 @@ import logging
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
+# Define the global list of user songs
+user_songs = [67016, 91000, 81004, 17000, 20414, 81000, 81074, 81109, 20652, 
+              91016, 91017, 91018, 51150, 51503, 56064, 33012, 57162, 53050, 
+              67351, 51450, 94632, 51500, 53055]
+
+
 # DQN Model Definition
 class DQN(nn.Module):
     def __init__(self, state_size, action_size):
@@ -52,24 +58,20 @@ def preprocess_data(df):
     logging.debug(f"Data preprocessing complete. Shape of scaled data: {df_scaled.shape}")
     return df_scaled.drop_duplicates()
 
-# Helper Function to Get User's Songs from Database and Initialize Playlist
+# Helper Function to Get User's Songs and Initialize Playlist
 def get_user_playlist_from_db(user_id, df_scaled):
-    logging.debug(f"Fetching user {user_id}'s playlist from database...")
+    logging.debug(f"Fetching user {user_id}'s playlist from predefined global song list...")
     
-    session = get_session()
-    with session:
-        statement = select(UserHistory).filter_by(user_id=user_id, reward=1)  # Only select liked songs (reward=1)
-        user_history = session.scalars(statement).all()
-
-    # Initialize user playlist based on the song_id from the dataset
+    # Use the predefined global list of user songs
     user_playlist = []
-    for record in user_history:
-        song_record = df_scaled[df_scaled['song_id'] == record.song_id]
+    for song_id in user_songs:
+        song_record = df_scaled[df_scaled['song_id'] == song_id]
         if not song_record.empty:
             user_playlist.append(song_record['song_id'].values[0])
     
-    logging.debug(f"User {user_id}'s playlist: {user_playlist}")
-    return user_playlist, len(user_history)
+    logging.debug(f"User {user_id}'s playlist (from global song list): {user_playlist}")
+    return user_playlist, len(user_playlist)
+
 
 
 def update_user_feedback(user_id, feedback):
@@ -138,7 +140,7 @@ def fetch_user_history_and_recommend(user_id, df_scaled, features, feature_weigh
         logging.debug(f"User {user_id} has sufficient history for model training. Initiating background training.")
         run_background_training(user_id, df_scaled, features, feature_weights)
     
-    recommended_songs_df = recommend_songs_filtered(user_songs, df_scaled, features, feature_weights, top_n=10)
+    recommended_songs_df = recommend_songs_filtered(user_songs, df_scaled, features, feature_weights, top_n=20)
     return recommended_songs_df
 
 # DQN Initialization Function
@@ -273,3 +275,8 @@ def convert_mood_to_state(mood):
         'Excited': 9
     }
     return mood_mapping.get(mood, 5)  # Default to 'Calm' if mood not found
+
+# Define the get_initial_state function to return the user's current mood state
+def get_initial_state(mood_state):
+    # Simply return the mood state as the initial state
+    return [mood_state]  # Returning as a list for compatibility with the DQN model
