@@ -164,8 +164,8 @@ def background_train_dqn(user_id, df_scaled, features, feature_weights):
     recommended_songs_df = recommend_songs_filtered(user_songs, df_scaled, features, feature_weights, top_n=200)
     action_size = len(recommended_songs_df)
 
-    policy_net, target_net, optimizer, memory = init_dqn_model(9, action_size)
-    
+    policy_net, target_net, optimizer, memory = init_dqn_model(1, action_size)  # State size is now 1 (integer state)
+
     eps_start = 1.0
     eps_end = 0.1
     eps_decay = 0.995
@@ -175,23 +175,35 @@ def background_train_dqn(user_id, df_scaled, features, feature_weights):
     eps_threshold = eps_start
     num_episodes = 10
 
+    # Initialize the state based on the user's mood (integer representation)
     user_mood = get_user_mood(user_id)
-    mood_state = convert_mood_to_state(user_mood)
+    state = convert_mood_to_state(user_mood)  # Integer state
 
     for episode in range(num_episodes):
-        state = get_initial_state(mood_state)
         for t in range(10):
-            action = select_action(state, eps_threshold, action_size)
-            next_state, reward = get_user_feedback(action, recommended_songs_df, mood_state)
-            memory.append((state, action, reward, next_state))
+            # Pass policy_net into select_action function
+            action = select_action([state], eps_threshold, action_size, policy_net)
+
+            # Simulate next state and reward based on the action
+            next_state, reward = get_next_state_and_reward(action, recommended_songs_df)
+
+            # Append to memory for DQN training
+            memory.append(([state], action, reward, [next_state]))  # Store states as lists for torch compatibility
+            
+            # Optimize the DQN model using the memory
             optimize_model(policy_net, target_net, memory, optimizer, batch_size, gamma)
-            state = next_state
+            
+            # Update the state to the next one
+            state = next_state  # Update with the integer next_state
+
         eps_threshold = max(eps_end, eps_threshold * eps_decay)
 
         if episode % target_update == 0:
             target_net.load_state_dict(policy_net.state_dict())
-    
+
     logging.debug(f"Background training completed for user {user_id}.")
+
+
 
 # Function to run training in the background
 def run_background_training(user_id, df_scaled, features, feature_weights):
@@ -207,27 +219,32 @@ def optimize_model(policy_net, target_net, memory, optimizer, batch_size, gamma)
     transitions = random.sample(memory, batch_size)
     batch_state, batch_action, batch_reward, batch_next_state = zip(*transitions)
 
-    batch_state = torch.tensor(batch_state).float()
+    # Convert the batch to tensors (now using scalar states)
+    batch_state = torch.tensor(batch_state).float()  # Ensure states are 1D tensors
     batch_action = torch.tensor(batch_action).long()
     batch_reward = torch.tensor(batch_reward).float()
     batch_next_state = torch.tensor(batch_next_state).float()
 
+    # Compute Q-values
     q_values = policy_net(batch_state).gather(1, batch_action.unsqueeze(1)).squeeze(1)
     next_q_values = target_net(batch_next_state).max(1)[0]
     expected_q_values = batch_reward + (gamma * next_q_values)
 
+    # Optimize the model
     loss = nn.functional.mse_loss(q_values, expected_q_values)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
-# Action Selection Based on Exploration-Exploitation Tradeoff
-def select_action(state, eps_threshold, action_size):
+
+
+def select_action(state, eps_threshold, action_size, policy_net):
     if random.random() > eps_threshold:
         with torch.no_grad():
-            return policy_net(torch.tensor(state).float()).argmax().item()
+            return policy_net(torch.tensor(state).float()).argmax().item()  # Use policy_net to predict action
     else:
-        return random.randrange(action_size)
+        return random.randrange(action_size)  # Exploration: return random action
+
 
 # Function to update user mood in the database
 def update_user_mood(user_id, mood):
@@ -276,7 +293,29 @@ def convert_mood_to_state(mood):
     }
     return mood_mapping.get(mood, 5)  # Default to 'Calm' if mood not found
 
-# Define the get_initial_state function to return the user's current mood state
+import numpy as np
+
 def get_initial_state(mood_state):
-    # Simply return the mood state as the initial state
-    return [mood_state]  # Returning as a list for compatibility with the DQN model
+    """
+    Return a one-hot encoded vector representing the user's mood state.
+    Mood state is expected to be an integer in the range [1, 9].
+    """
+    state_size = 9
+    state = np.zeros(state_size)
+    state[mood_state - 1] = 1  # Set the corresponding index for the mood state to 1
+    return state  # Return the one-hot encoded state
+
+def get_next_state_and_reward(action, recommended_songs_df):
+    """
+    Simulate the next state and reward based on the action.
+    Here, the action corresponds to a recommended song, and the reward is based on user feedback or random values.
+    """
+    song = recommended_songs_df.iloc[action]  # Get the song from the recommended songs
+    
+    # For now, let's assume reward is randomly assigned for simulation purposes
+    reward = random.choice([-1, 0, 1])  # -1: dislike, 0: neutral, 1: like
+    
+    # For the next state, return the current song's features (to simulate mood state transition)
+    next_state = convert_mood_to_state('Calm')  # Replace with actual logic if necessary
+
+    return next_state, reward
