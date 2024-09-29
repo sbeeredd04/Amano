@@ -68,7 +68,7 @@ def get_user_playlist_from_db(user_id, df_scaled):
         if not song_record.empty:
             user_playlist.append(song_record['song_id'].values[0])
     
-    return user_playlist
+    return user_playlist, len(user_history)
 
 # Helper Function to Update User Feedback in Database
 def update_user_feedback(user_id, feedback):
@@ -120,13 +120,31 @@ def recommend_songs_filtered(user_songs, df, features, feature_weights, top_n=0)
     return recommendations
 
 # Function to Fetch User Interaction History and Generate Immediate Recommendations
-def fetch_user_history_and_recommend(user_id, df_scaled, features, feature_weights):
+def fetch_user_history_and_recommend(user_id, df_scaled, features, feature_weights, default_mood='Calm'):
     """
     Serve immediate recommendations without retraining. Use the latest trained model to serve recommendations.
+    The mood will default to 'Calm' if it has not been set by the user.
     """
-    user_songs = get_user_playlist_from_db(user_id, df_scaled)  # Initialize user's playlist from the song database
+    # Get user mood from the database or set to default mood ('Calm')
+    user_mood = get_user_mood(user_id)
+    if not user_mood:
+        user_mood = default_mood
+
+    # Initialize user's playlist from the song database and get the length of user history
+    user_songs, history_length = get_user_playlist_from_db(user_id, df_scaled)
+
+    # If no user songs are found, recommend popular tracks as a fallback
+    if not user_songs:
+        user_songs = df_scaled['song_id'].sample(10).tolist()  # Pick 10 random songs for initial recommendation
+
+    # If enough user history exists, start DQN model
+    if history_length >= 10:
+        run_background_training(user_id, df_scaled, features, feature_weights)
+
+    # Filter recommendations based on the user's history or default mood
     recommended_songs_df = recommend_songs_filtered(user_songs, df_scaled, features, feature_weights, top_n=10)
-    return recommended_songs_df  # Return recommendations immediately
+
+    return recommended_songs_df
 
 # DQN Initialization Function
 def init_dqn_model(state_size, action_size):
@@ -145,7 +163,7 @@ def background_train_dqn(user_id, df_scaled, features, feature_weights):
     print(f"Starting background training for user {user_id}...")
     
     # Initialize user's playlist from the song database
-    user_songs = get_user_playlist_from_db(user_id, df_scaled)
+    user_songs, _ = get_user_playlist_from_db(user_id, df_scaled)
     recommended_songs_df = recommend_songs_filtered(user_songs, df_scaled, features, feature_weights, top_n=200)
     action_size = len(recommended_songs_df)
 
