@@ -3,3 +3,7 @@ scikit-learn
 seaborn
 matplotlib
 vaderSentiment
+openai
+sqlalchemy
+langchain
+langchain_aws
