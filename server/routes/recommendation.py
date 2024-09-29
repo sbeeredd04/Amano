@@ -1,11 +1,14 @@
 from flask import Blueprint, request, jsonify
 from services.recommendation_service import update_user_feedback,  run_background_training, fetch_user_history_and_recommend, update_user_mood
 import pandas as pd
+import os
+
 
 recommendation_bp = Blueprint('recommendation', __name__)
 
 # Load the preprocessed dataset
-df_scaled = pd.read_csv('../spotify_Song_Dataset/final_dataset.csv')  # Preprocessed CSV
+df_scaled = pd.read_csv(os.path.join(os.path.dirname(os.path.dirname(__name__)), "spotify_Song_Dataset/final_dataset.csv"))  # Preprocessed CSV
+print(os.path.curdir)
 features = ['energy', 'acousticness', 'valence', 'tempo', 'speechiness', 'instrumentalness']
 feature_weights = {'energy': 1.0, 'acousticness': 5.0, 'valence': 5.0, 'tempo': 5.0, 'instrumentalness': 5.0, 'speechiness': 5.0}
 

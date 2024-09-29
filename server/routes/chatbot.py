@@ -33,7 +33,7 @@ def map_sentiment_to_mood(sentiment):
 
 @chatbot_bp.route('/', methods=['POST'])
 def chatbot():
-    input_text = request.json.get('input')
+    input_text = request.json.get('text')
     user_id = request.json.get('user_id')
 
     if not input_text or not user_id:
