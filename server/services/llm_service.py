@@ -1,14 +1,14 @@
 import os
 from langchain_aws.chat_models.bedrock import ChatBedrock
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def invoke_llm(user_text):
     """
     Use LLM (Amazon Bedrock) to analyze user input and determine mood/sentiment.
     Returns one of the 9 moods: Angry, Content, Happy, Delighted, Calm, Sleepy, Sad, Depressed, Excited.
     """
-    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-    
     # Create a structured prompt for mood detection
     mood_prompt = f"""
     You are an AI that analyzes the mood of a user based on their input text. 
@@ -19,10 +19,13 @@ def invoke_llm(user_text):
     
     Return the mood:
     """
+    print("IT IS WORKING")
+    print(os.getenv('AWS_ACCESS_KEY_ID'))
+    print(os.getenv("AWS_SECRET_ACCESS_KEY"))
     
     llm = ChatBedrock(
-        aws_access_key_id= AWS_ACCESS_KEY_ID,
-        aws_secret_access_key= AWS_SECRET_ACCESS_KEY,
+        aws_access_key_id= os.getenv('AWS_ACCESS_KEY_ID'),
+        aws_secret_access_key= os.getenv("AWS_SECRET_ACCESS_KEY"),
         model_id="amazon.titan-text-lite-v1",
         region_name="us-west-2"
     )

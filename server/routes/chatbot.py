@@ -31,8 +31,17 @@ def map_sentiment_to_mood(sentiment):
     else:
         return 'Calm'  # Default fallback if no match
 
-@chatbot_bp.route('/', methods=['POST'])
+@chatbot_bp.route('', methods=['POST', 'OPTIONS'])
 def chatbot():
+    if request.method == 'OPTIONS':
+        # Return the CORS headers for the preflight request
+        response = jsonify({"message": "CORS preflight check successful"})
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:3000")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        return response
+
+    # Actual POST request handling
     input_text = request.json.get('text')
     user_id = request.json.get('user_id')
 
@@ -41,11 +50,11 @@ def chatbot():
 
     # Perform sentiment analysis using LLM
     sentiment = invoke_llm(input_text)
-    
+
     # Map the sentiment to one of the predefined moods
     mood = map_sentiment_to_mood(sentiment)
-    
+
     # Update the user's mood in the database
     update_user_mood(user_id, mood)
-    
+
     return jsonify({"mood": mood})

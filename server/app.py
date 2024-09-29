@@ -6,7 +6,7 @@ from routes.recommendation import recommendation_bp
 from utils.db import init_db  # Import init_db to initialize the database if needed
 
 app = Flask(__name__)
-CORS(app)  # Enable Cross-Origin Resource Sharing for requests from the frontend
+CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
 # Register blueprints (routes) from different modules
 app.register_blueprint(playlists_bp, url_prefix='/playlists')
