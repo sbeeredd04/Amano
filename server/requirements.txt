@@ -1,2 +1,3 @@
-langchain
-langchain_aws
+flask
+flask-cors
+sqlalchemy

@@ -1,3 +1,4 @@
+from venv import logger
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics.pairwise import cosine_similarity
@@ -10,17 +11,17 @@ import numpy as np
 from sqlalchemy import select
 from models.song_model import Song, UserHistory, UserMood
 from utils.db import get_session
-import threading
+from server.routes.playlist import get_user_songs
 import logging
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
-# Define the global list of user songs
-user_songs = [67016, 91000, 81004, 17000, 20414, 81000, 81074, 81109, 20652, 
-              91016, 91017, 91018, 51150, 51503, 56064, 33012, 57162, 53050, 
-              67351, 51450, 94632, 51500, 53055]
-
+# Define the global list of fallback user songs
+fallback_user_songs = [67016, 91000, 81004, 17000, 20414, 81000, 81074, 81109, 20652, 
+                        91016, 91017, 91018, 51150, 51503, 56064, 33012, 57162, 53050, 
+                        67351, 51450, 94632, 51500, 53055]
 
 # DQN Model Definition
 class DQN(nn.Module):
@@ -38,7 +39,7 @@ class DQN(nn.Module):
 # Data Preprocessing Helper Function
 def preprocess_data(df):
     logging.debug("Preprocessing data...")
-    
+
     df = df.dropna()
     df = df.drop(['duration_ms', 'explicit', 'mode', 'liveness', 'loudness', 'time_signature', 'key'], axis=1)
     df.rename(columns={'Unnamed: 0': 'song_id'}, inplace=True)
@@ -58,50 +59,68 @@ def preprocess_data(df):
     logging.debug(f"Data preprocessing complete. Shape of scaled data: {df_scaled.shape}")
     return df_scaled.drop_duplicates()
 
-# Helper Function to Get User's Songs and Initialize Playlist
+# Helper Function to Fetch User Songs Dynamically
 def get_user_playlist_from_db(user_id, df_scaled):
-    logging.debug(f"Fetching user {user_id}'s playlist from predefined global song list...")
-    
-    # Use the predefined global list of user songs
-    user_playlist = []
-    for song_id in user_songs:
-        song_record = df_scaled[df_scaled['song_id'] == song_id]
-        if not song_record.empty:
-            user_playlist.append(song_record['song_id'].values[0])
-    
-    logging.debug(f"User {user_id}'s playlist (from global song list): {user_playlist}")
-    return user_playlist, len(user_playlist)
+    logging.debug(f"Fetching user {user_id}'s playlist from database...")
 
+    user_songs = get_user_songs(user_id)
+    if not user_songs:
+        logging.warning(f"No playlists found for user {user_id}. Falling back to global song list.")
+        user_songs = fallback_user_songs
 
+    # Filter the songs that exist in the dataframe
+    valid_user_songs = [song_id for song_id in user_songs if not df_scaled[df_scaled['song_id'] == song_id].empty]
 
+    logging.debug(f"User {user_id}'s playlist: {valid_user_songs}")
+    return valid_user_songs, len(valid_user_songs)
+
+# Update User Feedback
 def update_user_feedback(user_id, feedback):
     logging.debug(f"Updating feedback for user {user_id}...")
-    
+
     session = get_session()
-    with session:
+    try:
         for item in feedback:
             song_id = item['song_id']
-            reward = item['reward']  # Use 'reward' instead of 'liked'
+            reward = item['reward']
             mood = item['mood']
 
-            # Check if the song already exists in the history
-            existing_record = session.query(UserHistory).filter_by(user_id=user_id, song_id=song_id).first()
+            # Update or create user history
+            history = session.query(UserHistory).filter_by(
+                user_id=user_id,
+                song_id=song_id
+            ).first()
 
-            if existing_record:
-                existing_record.reward = reward  # Update 'reward'
-                existing_record.mood = mood
+            if history:
+                history.reward = reward
+                history.mood = mood
             else:
-                new_history = UserHistory(user_id=user_id, song_id=song_id, reward=reward, mood=mood)
+                new_history = UserHistory(
+                    user_id=user_id,
+                    song_id=song_id,
+                    reward=reward,
+                    mood=mood
+                )
                 session.add(new_history)
-        
+
         session.commit()
 
-    logging.debug(f"Feedback update complete for user {user_id}")
+        # Check if we should trigger training
+        history_count = session.query(UserHistory).filter_by(user_id=user_id).count()
+        if history_count >= 5:
+            run_background_training(user_id)
+
+    except Exception as e:
+        session.rollback()
+        logging.error(f"Error updating user feedback: {e}")
+        raise
+    finally:
+        session.close()
 
 # Filter Songs Based on Similarity and Append User Playlist Songs
 def recommend_songs_filtered(user_songs, df, features, feature_weights, top_n=0):
     logging.debug("Filtering and recommending songs based on similarity...")
-    
+
     df_copy = df.copy()
     for feature in features:
         df_copy[feature] = df_copy[feature] * feature_weights.get(feature, 1.0)
@@ -112,49 +131,103 @@ def recommend_songs_filtered(user_songs, df, features, feature_weights, top_n=0)
     similarity_matrix = cosine_similarity(filtered_df[features], user_songs_df[features])
     aggregated_similarities = similarity_matrix.mean(axis=1)
     filtered_df['similarity'] = aggregated_similarities
-    
+
     recommendations = filtered_df[~filtered_df['song_id'].isin(user_songs)].sort_values(by=['similarity', 'popularity'], ascending=[False, False])
 
     if top_n > 0:
         recommendations = recommendations.head(top_n // 2)  # 50% new songs
         user_songs_df = user_songs_df.sample(min(len(user_songs_df), top_n // 2))  # 50% user playlist songs
-    
+
     final_recommendations = pd.concat([user_songs_df, recommendations]).drop_duplicates()
 
     logging.debug(f"Generated {len(final_recommendations)} song recommendations.")
     logging.debug(f"Recommendations: \n{final_recommendations[['song_id', 'track_name', 'similarity']].head(10)}")
-    
+
     return final_recommendations
 
-# Function to Fetch User Interaction History and Generate Immediate Recommendations
-def fetch_user_history_and_recommend(user_id, df_scaled, features, feature_weights, default_mood='Calm'):
-    logging.debug(f"Fetching user {user_id}'s history and generating recommendations...")
+# Fetch User History and Generate Immediate Recommendations
+def fetch_user_history_and_recommend(user_id, mood=None, use_user_songs=True, df_scaled=None):
+    """
+    Fetch user history and generate recommendations.
+    """
+    logger.info("=== Starting Recommendation Generation ===")
+    logger.info(f"Parameters: user_id={user_id}, mood={mood}, use_user_songs={use_user_songs}")
     
-    user_mood = get_user_mood(user_id) or default_mood
-    user_songs, history_length = get_user_playlist_from_db(user_id, df_scaled)
-
-    if not user_songs:
-        user_songs = df_scaled['song_id'].sample(10).tolist()  # Pick 10 random songs for initial recommendation
-
-    if history_length >= 5:
-        logging.debug(f"User {user_id} has sufficient history for model training. Initiating background training.")
-        run_background_training(user_id, df_scaled, features, feature_weights)
+    if df_scaled is None:
+        logger.info("Loading dataset as it wasn't provided")
+        df_scaled = load_and_get_dataset()
     
-    recommended_songs_df = recommend_songs_filtered(user_songs, df_scaled, features, feature_weights, top_n=20)
-    return recommended_songs_df
+    try:
+        session = get_session()
+        
+        if use_user_songs:
+            logger.info("Using user's song history for recommendations")
+            history = session.query(UserHistory).filter_by(user_id=user_id).all()
+            
+            if not history:
+                logger.info("No user history found, falling back to default recommendations")
+                return get_default_recommendations(df_scaled)
+            
+            logger.info(f"Found {len(history)} historical interactions")
+            
+            # Try DQN model first
+            try:
+                logger.info("Attempting to use DQN model for recommendations")
+                model_path = f"models/dqn_{user_id}.pth"
+                
+                if os.path.exists(model_path):
+                    logger.info("Found existing DQN model")
+                    # Convert mood to state
+                    mood_state = convert_mood_to_state(mood)
+                    logger.info(f"Converted mood '{mood}' to state: {mood_state}")
+                    
+                    recommendations = get_dqn_recommendations(user_id, mood_state, df_scaled)
+                    if recommendations is not None and len(recommendations) > 0:
+                        logger.info("Successfully generated DQN recommendations")
+                        logger.debug(f"First 3 DQN recommendations: {recommendations[:3]}")
+                        return recommendations
+                else:
+                    logger.info("No DQN model found for user")
+            except Exception as e:
+                logger.warning(f"DQN recommendation failed: {e}", exc_info=True)
+            
+            # Fallback to similarity-based recommendations
+            logger.info("Falling back to similarity-based recommendations")
+            recommendations = process_user_history(history, mood)
+            logger.info(f"Generated {len(recommendations)} similarity-based recommendations")
+            return recommendations
+        else:
+            logger.info("Using default recommendations")
+            recommendations = get_default_recommendations(df_scaled)
+            logger.info(f"Generated {len(recommendations)} default recommendations")
+            return recommendations
+            
+    except Exception as e:
+        logger.error(f"Error in fetch_user_history_and_recommend: {e}", exc_info=True)
+        raise
+    finally:
+        session.close()
 
-# DQN Initialization Function
-def init_dqn_model(state_size, action_size):
-    logging.debug("Initializing DQN model...")
-    
-    policy_net = DQN(state_size, action_size)
-    target_net = DQN(state_size, action_size)
-    target_net.load_state_dict(policy_net.state_dict())
-    optimizer = optim.Adam(policy_net.parameters())
-    memory = deque(maxlen=10000)
-
-    logging.debug("DQN model initialized successfully.")
-    return policy_net, target_net, optimizer, memory
+def process_user_history(history, mood=None):
+    """Process user history to generate recommendations."""
+    try:
+        # Get positive feedback songs
+        liked_songs = [h.song_id for h in history if h.reward > 0]
+        if not liked_songs:
+            return get_default_recommendations()
+        
+        # Get similar songs based on liked songs
+        similar_songs = df_scaled[df_scaled['song_id'].isin(liked_songs)]
+        if similar_songs.empty:
+            return get_default_recommendations()
+            
+        # Sample recommendations
+        recommendations = df_scaled.sample(n=min(10, len(df_scaled)))
+        return recommendations.to_dict('records')
+        
+    except Exception as e:
+        logger.error(f"Error processing user history: {e}")
+        return get_default_recommendations()
 
 # Background Training Function
 def background_train_dqn(user_id, df_scaled, features, feature_weights):
@@ -175,26 +248,18 @@ def background_train_dqn(user_id, df_scaled, features, feature_weights):
     eps_threshold = eps_start
     num_episodes = 10
 
-    # Initialize the state based on the user's mood (integer representation)
     user_mood = get_user_mood(user_id)
     state = convert_mood_to_state(user_mood)  # Integer state
 
     for episode in range(num_episodes):
         for t in range(10):
-            # Pass policy_net into select_action function
             action = select_action([state], eps_threshold, action_size, policy_net)
-
-            # Simulate next state and reward based on the action
             next_state, reward = get_next_state_and_reward(action, recommended_songs_df)
 
-            # Append to memory for DQN training
-            memory.append(([state], action, reward, [next_state]))  # Store states as lists for torch compatibility
-            
-            # Optimize the DQN model using the memory
+            memory.append(([state], action, reward, [next_state]))
             optimize_model(policy_net, target_net, memory, optimizer, batch_size, gamma)
-            
-            # Update the state to the next one
-            state = next_state  # Update with the integer next_state
+
+            state = next_state
 
         eps_threshold = max(eps_end, eps_threshold * eps_decay)
 
@@ -202,8 +267,6 @@ def background_train_dqn(user_id, df_scaled, features, feature_weights):
             target_net.load_state_dict(policy_net.state_dict())
 
     logging.debug(f"Background training completed for user {user_id}.")
-
-
 
 # Function to run training in the background
 def run_background_training(user_id, df_scaled, features, feature_weights):
@@ -236,15 +299,12 @@ def optimize_model(policy_net, target_net, memory, optimizer, batch_size, gamma)
     loss.backward()
     optimizer.step()
 
-
-
 def select_action(state, eps_threshold, action_size, policy_net):
     if random.random() > eps_threshold:
         with torch.no_grad():
             return policy_net(torch.tensor(state).float()).argmax().item()  # Use policy_net to predict action
     else:
         return random.randrange(action_size)  # Exploration: return random action
-
 
 # Function to update user mood in the database
 def update_user_mood(user_id, mood):
@@ -266,14 +326,16 @@ def update_user_mood(user_id, mood):
 
 # Function to get user mood from the database
 def get_user_mood(user_id):
+    """Get user's current mood."""
     session = get_session()
-    with session:
-        existing_mood = session.query(UserMood).filter_by(user_id=user_id).first()
-        if existing_mood:
-            return existing_mood.mood
-        else:
-            return 'Calm'
-        
+    try:
+        user_mood = session.query(UserMood).filter_by(user_id=user_id).first()
+        return user_mood.mood if user_mood else "Calm"  # Default mood
+    except Exception as e:
+        logger.error(f"Error getting user mood: {e}")
+        return "Calm"  # Return default mood on error
+    finally:
+        session.close()
 
 def convert_mood_to_state(mood):
     """
@@ -319,3 +381,80 @@ def get_next_state_and_reward(action, recommended_songs_df):
     next_state = convert_mood_to_state('Calm')  # Replace with actual logic if necessary
 
     return next_state, reward
+
+def get_initial_recommendations(user_id, use_user_songs=True):
+    """
+    Get initial recommendations based on user's playlist history or default songs.
+    """
+    try:
+        session = get_session()
+        
+        if use_user_songs:
+            # Check if user has any history
+            user_history = session.query(UserHistory).filter_by(user_id=user_id).all()
+            if user_history:
+                # Use user's history for recommendations
+                return fetch_user_history_and_recommend(user_id=user_id)
+        
+        # If no user history or use_user_songs is False, use default recommendations
+        return get_default_recommendations()
+        
+    except Exception as e:
+        logger.error(f"Error getting initial recommendations: {e}")
+        raise
+    finally:
+        session.close()
+
+def get_default_recommendations(df_scaled):
+    """Get default recommendations."""
+    logger.info("Generating default recommendations")
+    try:
+        # Sample random songs
+        recommendations = df_scaled.sample(n=10).to_dict('records')
+        logger.info(f"Generated {len(recommendations)} default recommendations")
+        logger.debug(f"First 3 default recommendations: {recommendations[:3]}")
+        return recommendations
+    except Exception as e:
+        logger.error(f"Error getting default recommendations: {e}", exc_info=True)
+        raise
+
+def get_dqn_recommendations(user_id, state, df_scaled, top_n=10):
+    """Get recommendations using the trained DQN model."""
+    try:
+        model = DQN(state_size=1, action_size=len(df_scaled))
+        model.load_state_dict(torch.load(f"models/dqn_{user_id}.pth"))
+        model.eval()
+
+        with torch.no_grad():
+            state_tensor = torch.tensor([[state]], dtype=torch.float32)
+            q_values = model(state_tensor)
+            
+            # Get top N actions (song indices) based on Q-values
+            top_actions = q_values.squeeze().argsort(descending=True)[:top_n]
+            
+            # Convert actions to song recommendations
+            recommended_songs = df_scaled[df_scaled['song_id'].isin([df_scaled['song_id'][i] for i in top_actions])]
+            
+            return recommended_songs
+
+    except Exception as e:
+        logging.error(f"Error getting DQN recommendations: {e}")
+        raise
+
+def load_and_get_dataset():
+    """Load and return the preprocessed dataset."""
+    try:
+        dataset_path = "/Users/sriujjwalreddyb/Amano/spotify_Song_Dataset/final_dataset.csv"
+        logger.info(f"Loading dataset from {dataset_path}")
+        
+        if not os.path.exists(dataset_path):
+            logger.error(f"Dataset file not found at {dataset_path}")
+            raise FileNotFoundError(f"Dataset not found at {dataset_path}")
+            
+        df = pd.read_csv(dataset_path)
+        logger.info(f"Successfully loaded dataset with {len(df)} records")
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error loading dataset: {e}")
+        raise

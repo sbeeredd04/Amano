@@ -12,8 +12,8 @@ export default function SignInPage() {
   const handleSubmit = async () => {
     try {
       const endpoint = isSignup
-        ? "https://upgraded-funicular-jvpw9xrp6v72p444-5000.app.github.dev/auth/signup"
-        : "https://upgraded-funicular-jvpw9xrp6v72p444-5000.app.github.dev/auth/login";
+        ? "https://70bnmmdc-5000.usw3.devtunnels.ms/auth/signup"
+        : "https://70bnmmdc-5000.usw3.devtunnels.ms/auth/login";
 
       const payload = isSignup ? { email, name, image } : { email };
       const response = await fetch(endpoint, {
