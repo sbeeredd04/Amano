@@ -77,7 +77,7 @@ def get_initial_recommendations_route():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error getting initial recommendations: {e}")
+        logger.error(f"Error getting initial recommendations: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @recommendation_bp.route('/refresh', methods=['POST'])
@@ -112,8 +112,7 @@ def refresh_recommendations():
         recommendations = fetch_user_history_and_recommend(
             user_id=user_id,
             mood=mood,
-            use_user_songs=use_user_songs,
-            df_scaled=df_scaled
+            use_user_songs=use_user_songs
         )
         
         logger.info(f"Received {len(recommendations)} recommendations")
@@ -128,8 +127,7 @@ def refresh_recommendations():
         logger.error(f"Error in refresh_recommendations: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
     finally:
-        if 'session' in locals():
-            session.close()
+        session.close()
 
 @recommendation_bp.route('/feedback', methods=['POST'])
 def handle_feedback():

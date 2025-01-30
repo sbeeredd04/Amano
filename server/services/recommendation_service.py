@@ -382,10 +382,15 @@ def get_next_state_and_reward(action, recommended_songs_df):
 
     return next_state, reward
 
-def get_initial_recommendations(user_id, use_user_songs=True):
+def get_initial_recommendations(user_id, use_user_songs=True, df_scaled=None):
     """
     Get initial recommendations based on user's playlist history or default songs.
+    Args:
+        user_id: The user's ID
+        use_user_songs: Whether to use user's song history
+        df_scaled: Pre-loaded scaled dataset (optional)
     """
+    logger.info(f"Getting initial recommendations for user {user_id}")
     try:
         session = get_session()
         
@@ -393,11 +398,17 @@ def get_initial_recommendations(user_id, use_user_songs=True):
             # Check if user has any history
             user_history = session.query(UserHistory).filter_by(user_id=user_id).all()
             if user_history:
+                logger.info("User has history, using personalized recommendations")
                 # Use user's history for recommendations
-                return fetch_user_history_and_recommend(user_id=user_id)
+                return fetch_user_history_and_recommend(
+                    user_id=user_id,
+                    use_user_songs=True,
+                    df_scaled=df_scaled
+                )
         
         # If no user history or use_user_songs is False, use default recommendations
-        return get_default_recommendations()
+        logger.info("Using default recommendations")
+        return get_default_recommendations(df_scaled)
         
     except Exception as e:
         logger.error(f"Error getting initial recommendations: {e}")
