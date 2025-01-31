@@ -14,6 +14,9 @@ from utils.db import get_session, get_dataset
 from server.routes.playlist import get_user_songs, get_all_user_playlist_songs
 import logging
 import os
+from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import StandardScaler
+from collections import Counter
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -151,39 +154,31 @@ def recommend_songs_filtered(user_songs, df, features, feature_weights, top_n=0)
 
 # Fetch User History and Generate Immediate Recommendations
 def fetch_user_history_and_recommend(user_id, mood=None, use_user_songs=True):
-    """Fetch user history and generate recommendations."""
+    """Updated recommendation pipeline with clustering."""
     logger.info(f"\n=== Generating Recommendations for User {user_id} ===")
-    logger.info(f"Mood: {mood}")
-    logger.info(f"Using user songs: {use_user_songs}")
     
     try:
         df_scaled = get_dataset()
         session = get_session()
         
         try:
-            # Check if user has a trained model
+            # Check for trained model
             model_path = f"models/user_{user_id}_dqn.pth"
             has_trained_model = os.path.exists(model_path)
             logger.info(f"Trained model exists: {has_trained_model}")
             
             if use_user_songs:
-                # Get user's playlist songs
                 user_songs = get_all_user_playlist_songs(user_id)
                 logger.info(f"Found {len(user_songs)} songs in user's playlists")
                 
                 if user_songs:
-                    logger.info("\nUser's playlist songs:")
-                    for song_id in user_songs[:5]:  # Log first 5 songs
-                        song = session.query(Song).filter_by(song_id=song_id).first()
-                        if song:
-                            logger.info(f"- {song.track_name} by {song.artists}")
-                    
-                    if len(user_songs) > 5:
-                        logger.info(f"... and {len(user_songs) - 5} more songs")
-                    
                     if has_trained_model:
-                        logger.info("\nUsing trained DQN model with playlist songs")
-                        # Get recommendations from trained model
+                        # Get both types of recommendations
+                        cluster_recommendations = get_cluster_based_recommendations(
+                            user_songs=user_songs,
+                            df_scaled=df_scaled
+                        )
+                        
                         dqn_recommendations = get_dqn_recommendations(
                             user_id=user_id,
                             df_scaled=df_scaled,
@@ -191,32 +186,22 @@ def fetch_user_history_and_recommend(user_id, mood=None, use_user_songs=True):
                             mood=mood
                         )
                         
-                        # Get similarity recommendations as backup
-                        similarity_recommendations = get_similarity_based_recommendations(
-                            user_songs=user_songs,
-                            df_scaled=df_scaled
-                        )
-                        
-                        # Combine both types of recommendations
-                        logger.info("Combining DQN and similarity recommendations")
+                        # Combine recommendations
                         recommendations = combine_recommendations(
                             dqn_recommendations,
-                            similarity_recommendations
+                            cluster_recommendations
                         )
                     else:
-                        logger.info("\nNo trained model found, using similarity-based recommendations")
-                        recommendations = get_similarity_based_recommendations(
+                        # Use only cluster-based recommendations
+                        recommendations = get_cluster_based_recommendations(
                             user_songs=user_songs,
                             df_scaled=df_scaled
                         )
                 else:
-                    logger.info("No songs in user's playlists, using default recommendations")
                     recommendations = get_default_recommendations(df_scaled)
             else:
-                logger.info("User songs not requested, using default recommendations")
                 recommendations = get_default_recommendations(df_scaled)
-            
-            logger.info(f"\nGenerated {len(recommendations)} total recommendations")
+                
             return recommendations
             
         finally:
@@ -256,7 +241,7 @@ def combine_recommendations(dqn_recs, similarity_recs, dqn_weight=0.7):
         
         logger.info(f"Combined {len(combined)} unique recommendations")
         return combined
-        
+            
     except Exception as e:
         logger.error(f"Error combining recommendations: {str(e)}", exc_info=True)
         raise
@@ -508,8 +493,8 @@ def get_initial_recommendations(user_id, use_user_songs=True, df_scaled=None):
             return get_similarity_based_recommendations(user_songs, df_scaled)
         else:
             logger.info("Using default recommendations")
-            return get_default_recommendations(df_scaled)
-            
+        return get_default_recommendations(df_scaled)
+        
     except Exception as e:
         logger.error(f"Error in initial recommendations: {e}")
         return get_default_recommendations(df_scaled)
@@ -566,7 +551,7 @@ def get_similarity_based_recommendations(user_songs, df_scaled=None, n_new_recom
                     logger.info(f"  Artist: {dataset_song.iloc[0]['artist_name']}")
         finally:
             session.close()
-            
+
         # Calculate similarity
         similarity_matrix = cosine_similarity(
             df_scaled[features],
@@ -746,3 +731,104 @@ def run_background_training(user_id, df_scaled=None, features=None, feature_weig
     except Exception as e:
         logger.error(f"Error in background training: {e}", exc_info=True)
         raise
+
+def get_cluster_based_recommendations(user_songs, df_scaled, n_recommendations=10, features=None):
+    """Get recommendations using clustering and similarity."""
+    logger.info("\n=== Generating Cluster-Based Recommendations ===")
+    
+    try:
+        if features is None:
+            features = ['energy', 'acousticness', 'valence', 'tempo', 'speechiness', 'instrumentalness']
+        
+        # Get user's songs features
+        user_songs_df = df_scaled[df_scaled['song_id'].isin(user_songs)]
+        logger.info(f"User songs count: {len(user_songs_df)}")
+        
+        if len(user_songs_df) == 0:
+            logger.info("No user songs found, returning default recommendations")
+            return get_default_recommendations(df_scaled)
+            
+        # Prepare features for clustering
+        X = StandardScaler().fit_transform(user_songs_df[features])
+        
+        # Perform DBSCAN clustering
+        logger.info("Performing DBSCAN clustering...")
+        dbscan = DBSCAN(eps=0.5, min_samples=2)  # Adjust parameters based on your data
+        clusters = dbscan.fit_predict(X)
+        
+        # Count points in each cluster
+        cluster_counts = Counter(clusters)
+        logger.info(f"Found {len(cluster_counts)} clusters")
+        for cluster_id, count in cluster_counts.items():
+            logger.info(f"Cluster {cluster_id}: {count} songs")
+            
+        # Calculate recommendations per cluster based on size
+        total_points = len(user_songs_df)
+        cluster_weights = {}
+        recommendations_per_cluster = {}
+        
+        for cluster_id in cluster_counts:
+            weight = cluster_counts[cluster_id] / total_points
+            cluster_weights[cluster_id] = weight
+            recs = max(1, int(n_recommendations * weight))
+            recommendations_per_cluster[cluster_id] = recs
+            logger.info(f"Cluster {cluster_id}: Weight={weight:.2f}, Recommendations={recs}")
+            
+        # Get recommendations for each cluster
+        all_recommendations = []
+        
+        for cluster_id in cluster_counts:
+            # Get songs in this cluster
+            cluster_mask = clusters == cluster_id
+            cluster_songs_df = user_songs_df[cluster_mask]
+            
+            logger.info(f"\nProcessing cluster {cluster_id}")
+            logger.info(f"Songs in cluster: {len(cluster_songs_df)}")
+            
+            # Calculate similarity for this cluster
+            similarity_matrix = cosine_similarity(
+                df_scaled[features],
+                cluster_songs_df[features]
+            )
+            
+            # Average similarity scores for this cluster
+            similarity_scores = np.mean(similarity_matrix, axis=1)
+            
+            # Get top recommendations for this cluster
+            n_cluster_recs = recommendations_per_cluster[cluster_id]
+            cluster_df = df_scaled.copy()
+            cluster_df['similarity'] = similarity_scores
+            
+            # Filter out user's songs and get top recommendations
+            cluster_recommendations = cluster_df[~cluster_df['song_id'].isin(user_songs)]\
+                .nlargest(n_cluster_recs, 'similarity')
+                
+            logger.info(f"Top recommendations for cluster {cluster_id}:")
+            for _, song in cluster_recommendations.iterrows():
+                logger.info(f"- {song['track_name']} (similarity: {song['similarity']:.3f})")
+                
+            all_recommendations.append(cluster_recommendations)
+            
+        # Combine all recommendations
+        final_recommendations = pd.concat(all_recommendations)
+        final_recommendations = final_recommendations.nlargest(n_recommendations, 'similarity')
+        
+        # Get familiar recommendations (unchanged)
+        n_familiar = min(5, len(user_songs_df))
+        familiar_recommendations = user_songs_df.sample(n=n_familiar)
+        
+        # Structure recommendations
+        recommendations = {
+            'new_songs': final_recommendations.to_dict('records'),
+            'user_songs': familiar_recommendations.to_dict('records')
+        }
+        
+        logger.info("\nFinal Recommendations Summary:")
+        logger.info(f"New songs: {len(final_recommendations)}")
+        logger.info(f"Familiar songs: {len(familiar_recommendations)}")
+        
+        return recommendations
+        
+    except Exception as e:
+        logger.error(f"Error in cluster-based recommendations: {str(e)}", exc_info=True)
+        return get_default_recommendations(df_scaled)
