@@ -21,7 +21,6 @@ def create_app():
          allow_headers=["Content-Type", "Authorization"],
          supports_credentials=True)
     
-    logger.debug("CORS configuration applied")
 
     # Register blueprints (routes) from different modules
     app.register_blueprint(playlists_bp, url_prefix='/playlists')
@@ -40,7 +39,6 @@ def create_app():
 
     @app.after_request
     def after_request(response):
-        logger.debug(f"Response headers: {dict(response.headers)}")
         return response
 
     # Add a route for the base URL '/'

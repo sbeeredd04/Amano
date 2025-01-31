@@ -5,13 +5,15 @@ from services.recommendation_service import (
     fetch_user_history_and_recommend, 
     update_user_mood,
     get_user_mood,
-    get_initial_recommendations
+    get_initial_recommendations,
+    refresh_recommendations as get_refreshed_recommendations,
+    get_all_user_playlist_songs
 )
 from utils.db import get_dataset
 import pandas as pd
 import os
 from utils.db import get_session
-from models.song_model import UserMood, UserHistory, Playlist, Song
+from models.song_model import UserMood, UserHistory
 import logging
 from flask_cors import CORS
 
@@ -79,38 +81,42 @@ def get_initial_recommendations_route():
 
 @recommendation_bp.route('/refresh', methods=['POST'])
 def refresh_recommendations():
-    """Endpoint to refresh recommendations based on user feedback and mood."""
-    logger.info("\n=== Recommendation Refresh ===")
+    """Endpoint to refresh recommendations."""
     try:
         data = request.json
         user_id = data.get('user_id')
-        mood = data.get('mood')
+        previous_recs = data.get('previous_recommendations', [])
+        refresh_type = data.get('refresh_type', 'smart')
         use_user_songs = data.get('use_user_songs', True)
         
-        logger.info(f"Request data - User ID: {user_id}, Mood: {mood}, Use User Songs: {use_user_songs}")
+        print(f"\n=== Refresh Recommendations Request ===")
+        print(f"User ID: {user_id}")
+        print(f"Refresh Type: {refresh_type}")
+        print(f"Use User Songs: {use_user_songs}")
+        print(f"Previous Recs Count: {len(previous_recs)}")
         
         if not user_id:
             return jsonify({"error": "User ID is required"}), 400
-
-        session = get_session()
-        try:
-            # Get user's playlists
-            playlists = session.query(Playlist).filter_by(user_id=user_id).all()
-            logger.info(f"Found {len(playlists)} playlists for user {user_id}")
             
-            recommendations = fetch_user_history_and_recommend(user_id, mood, use_user_songs)
-            logger.info(f"Generated {len(recommendations)} recommendations")
-            
-            return jsonify({"recommendations": recommendations}), 200
-            
-        except Exception as e:
-            logger.error(f"Database error: {str(e)}", exc_info=True)
-            return jsonify({"error": str(e)}), 500
-        finally:
-            session.close()
-
+        recommendations = get_refreshed_recommendations(
+            user_id=user_id,
+            previous_recs=previous_recs,
+            refresh_type=refresh_type,
+            use_user_songs=use_user_songs
+        )
+        
+        print(f"\nRecommendations Response:")
+        print(f"New Songs: {len(recommendations.get('new_songs', []))}")
+        print(f"User Songs: {len(recommendations.get('user_songs', []))}")
+        print(f"Source: {recommendations.get('source', 'unknown')}")
+        
+        return jsonify({
+            "recommendations": recommendations,
+            "source": "user_playlist" if use_user_songs else "default"
+        }), 200
+        
     except Exception as e:
-        logger.error(f"Request error: {str(e)}", exc_info=True)
+        print(f"\nError in refresh endpoint: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @recommendation_bp.route('/feedback', methods=['POST'])
