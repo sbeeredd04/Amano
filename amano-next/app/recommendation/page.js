@@ -788,6 +788,17 @@ export default function RecommendationPage() {
     }
   };
 
+  // Add this function at the top of your component
+  const scrollToSection = (sectionId) => {
+    const section = document.getElementById(sectionId);
+    if (section) {
+      section.scrollIntoView({ 
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }
+  };
+
   // Add this function to handle song removal
   const handleRemoveSong = async (playlistId, songId) => {
     try {
@@ -827,11 +838,24 @@ export default function RecommendationPage() {
     }
   };
 
-  const handleLogout = () => {
-    // Clear session storage
-    sessionStorage.clear();
-    // Redirect to home page
-    router.push("/");
+  const handleLogout = async () => {
+    try {
+      // Clear all session data
+      sessionStorage.clear();
+      
+      // Show a brief success message
+      setMessage("Logging out...");
+      
+      // Small delay to show the message
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Redirect to home page
+      router.push("/");
+      
+    } catch (error) {
+      console.error("Error during logout:", error);
+      setMessage("Error logging out. Please try again.");
+    }
   };
 
   return (
@@ -857,11 +881,13 @@ export default function RecommendationPage() {
                 active={activeItem}
                 item="Home"
               >
-                <NavSection
-                  title="Home"
-                  description="Return to the main dashboard"
-                  href="#home"
-                />
+                <div 
+                  onClick={() => scrollToSection('home')}
+                  className="cursor-pointer hover:bg-white/10 px-4 py-2 rounded-lg transition-colors"
+                >
+                  <h4 className="text-xl font-bold mb-1 text-white">Home</h4>
+                  <p className="text-neutral-300 text-sm">Return to the main dashboard</p>
+                </div>
               </MenuItem>
 
               <MenuItem
@@ -869,11 +895,13 @@ export default function RecommendationPage() {
                 active={activeItem}
                 item="Songs"
               >
-                <NavSection
-                  title="Songs"
-                  description="Browse and manage your music collection"
-                  href="#songs"
-                />
+                <div 
+                  onClick={() => scrollToSection('songs')}
+                  className="cursor-pointer hover:bg-white/10 px-4 py-2 rounded-lg transition-colors"
+                >
+                  <h4 className="text-xl font-bold mb-1 text-white">Songs</h4>
+                  <p className="text-neutral-300 text-sm">Browse and manage your music</p>
+                </div>
               </MenuItem>
 
               <MenuItem
@@ -881,11 +909,13 @@ export default function RecommendationPage() {
                 active={activeItem}
                 item="Playlists"
               >
-                <NavSection
-                  title="Playlists"
-                  description="Manage your custom playlists"
-                  href="#playlists"
-                />
+                <div 
+                  onClick={() => scrollToSection('playlists')}
+                  className="cursor-pointer hover:bg-white/10 px-4 py-2 rounded-lg transition-colors"
+                >
+                  <h4 className="text-xl font-bold mb-1 text-white">Playlists</h4>
+                  <p className="text-neutral-300 text-sm">Manage your custom playlists</p>
+                </div>
               </MenuItem>
 
               <MenuItem
@@ -893,11 +923,13 @@ export default function RecommendationPage() {
                 active={activeItem}
                 item="Recommendations"
               >
-                <NavSection
-                  title="Recommendations"
-                  description="Get personalized music suggestions"
-                  href="#recommendations"
-                />
+                <div 
+                  onClick={() => scrollToSection('recommendations')}
+                  className="cursor-pointer hover:bg-white/10 px-4 py-2 rounded-lg transition-colors"
+                >
+                  <h4 className="text-xl font-bold mb-1 text-white">Recommendations</h4>
+                  <p className="text-neutral-300 text-sm">Get personalized suggestions</p>
+                </div>
               </MenuItem>
             </div>
 
@@ -909,11 +941,13 @@ export default function RecommendationPage() {
                 active={activeItem}
                 item={`Hi, ${userName}`}
               >
-                <NavSection
-                  title="Profile"
-                  description="View your profile settings"
-                  href="#profile"
-                />
+                <div 
+                  onClick={() => scrollToSection('profile')}
+                  className="cursor-pointer hover:bg-white/10 px-4 py-2 rounded-lg transition-colors"
+                >
+                  <h4 className="text-xl font-bold mb-1 text-white">Profile</h4>
+                  <p className="text-neutral-300 text-sm">View your profile settings</p>
+                </div>
               </MenuItem>
 
               <MenuItem
@@ -924,7 +958,7 @@ export default function RecommendationPage() {
               >
                 <div 
                   onClick={handleLogout}
-                  className="cursor-pointer px-4 py-2"
+                  className="cursor-pointer px-4 py-2 hover:bg-red-500/20 rounded-lg transition-colors"
                 >
                   <h4 className="text-red-500 font-bold mb-1">Logout</h4>
                   <p className="text-red-300 text-sm">Sign out of your account</p>
@@ -944,7 +978,7 @@ export default function RecommendationPage() {
             </div>
           </section>
 
-          <section id="songs" className="min-h-screen p-6 bg-transparent">
+          <section id="songs" className="min-h-screen p-6 pt-32 bg-transparent">
             <h2 className="text-4xl font-bold text-center mb-12">
               {editingPlaylist ? `Edit Playlist: ${editingPlaylist.name}` : "Discover Songs"}
             </h2>
@@ -1042,7 +1076,7 @@ export default function RecommendationPage() {
             </div>
           </section>
 
-          <section id="playlists" className="min-h-screen p-6 bg-transparent">
+          <section id="playlists" className="min-h-screen p-6 pt-32 bg-transparent">
             <h2 className="text-4xl font-bold text-center mb-12">Your Playlists</h2>
             <div className="max-w-6xl mx-auto">
               <ExpandablePlaylist
@@ -1054,7 +1088,7 @@ export default function RecommendationPage() {
             </div>
           </section>
 
-          <section id="recommendations" className="min-h-screen p-6 bg-transparent">
+          <section id="recommendations" className="min-h-screen p-6 pt-32 bg-transparent">
             <h2 className="text-4xl font-bold text-center mb-12">Your Recommendations</h2>
             
             <div className="max-w-6xl mx-auto mb-8 flex justify-center gap-4">
@@ -1117,6 +1151,13 @@ export default function RecommendationPage() {
         onCreateNew={handleCreateNewPlaylist}
         playlists={playlists}
       />
+
+      {/* Show message if exists */}
+      {message && (
+        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-black/80 text-white px-6 py-3 rounded-full z-50">
+          {message}
+        </div>
+      )}
     </div>
   );
 }

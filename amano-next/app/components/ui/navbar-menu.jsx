@@ -20,9 +20,31 @@ export const MenuItem = ({
   children,
   className
 }) => {
+  // Get the section ID from the first child's onClick handler if it exists
+  const getTargetSection = () => {
+    if (children?.props?.onClick) {
+      const onClickString = children.props.onClick.toString();
+      const match = onClickString.match(/scrollToSection\('(.+?)'\)/);
+      return match ? match[1] : null;
+    }
+    return null;
+  };
+
+  const handleClick = () => {
+    const sectionId = getTargetSection();
+    if (sectionId) {
+      const section = document.getElementById(sectionId);
+      section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   return (
-    <div onMouseEnter={() => setActive(item)} className="relative">
+    <div 
+      onMouseEnter={() => setActive(item)} 
+      className="relative"
+    >
       <motion.p
+        onClick={handleClick}
         transition={{ duration: 0.3 }}
         className={`cursor-pointer text-white hover:opacity-[0.9] text-sm font-medium ${className}`}>
         {item}
@@ -40,7 +62,7 @@ export const MenuItem = ({
                 className="bg-black backdrop-blur-sm rounded-2xl overflow-hidden border border-white/[0.2] shadow-xl">
                 <motion.div
                   layout
-                  className="w-max h-full p-4">
+                  className="w-max h-full">
                   {children}
                 </motion.div>
               </motion.div>
