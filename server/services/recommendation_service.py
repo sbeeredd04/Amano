@@ -10,7 +10,7 @@ from collections import deque
 import numpy as np
 from sqlalchemy import select
 from models.song_model import Song, UserHistory, UserMood
-from utils.db import get_session
+from utils.db import get_session, get_dataset
 from server.routes.playlist import get_user_songs, get_all_user_playlist_songs
 import logging
 import os
@@ -150,47 +150,115 @@ def recommend_songs_filtered(user_songs, df, features, feature_weights, top_n=0)
     return final_recommendations
 
 # Fetch User History and Generate Immediate Recommendations
-def fetch_user_history_and_recommend(user_id, mood=None, use_user_songs=True, df_scaled=None):
-    """
-    Fetch user history and generate recommendations.
-    """
-    logger.info(f"Generating recommendations for user {user_id}")
-    
-    if df_scaled is None:
-        df_scaled = load_and_get_dataset()
+def fetch_user_history_and_recommend(user_id, mood=None, use_user_songs=True):
+    """Fetch user history and generate recommendations."""
+    logger.info(f"\n=== Generating Recommendations for User {user_id} ===")
+    logger.info(f"Mood: {mood}")
+    logger.info(f"Using user songs: {use_user_songs}")
     
     try:
+        df_scaled = get_dataset()
         session = get_session()
         
-        if use_user_songs:
-            history = session.query(UserHistory).filter_by(user_id=user_id).all()
+        try:
+            # Check if user has a trained model
+            model_path = f"models/user_{user_id}_dqn.pth"
+            has_trained_model = os.path.exists(model_path)
+            logger.info(f"Trained model exists: {has_trained_model}")
             
-            if not history:
-                logger.info("No history found - using defaults")
-                return get_default_recommendations(df_scaled)
+            if use_user_songs:
+                # Get user's playlist songs
+                user_songs = get_all_user_playlist_songs(user_id)
+                logger.info(f"Found {len(user_songs)} songs in user's playlists")
+                
+                if user_songs:
+                    logger.info("\nUser's playlist songs:")
+                    for song_id in user_songs[:5]:  # Log first 5 songs
+                        song = session.query(Song).filter_by(song_id=song_id).first()
+                        if song:
+                            logger.info(f"- {song.track_name} by {song.artists}")
+                    
+                    if len(user_songs) > 5:
+                        logger.info(f"... and {len(user_songs) - 5} more songs")
+                    
+                    if has_trained_model:
+                        logger.info("\nUsing trained DQN model with playlist songs")
+                        # Get recommendations from trained model
+                        dqn_recommendations = get_dqn_recommendations(
+                            user_id=user_id,
+                            df_scaled=df_scaled,
+                            user_songs=user_songs,
+                            mood=mood
+                        )
+                        
+                        # Get similarity recommendations as backup
+                        similarity_recommendations = get_similarity_based_recommendations(
+                            user_songs=user_songs,
+                            df_scaled=df_scaled
+                        )
+                        
+                        # Combine both types of recommendations
+                        logger.info("Combining DQN and similarity recommendations")
+                        recommendations = combine_recommendations(
+                            dqn_recommendations,
+                            similarity_recommendations
+                        )
+                    else:
+                        logger.info("\nNo trained model found, using similarity-based recommendations")
+                        recommendations = get_similarity_based_recommendations(
+                            user_songs=user_songs,
+                            df_scaled=df_scaled
+                        )
+                else:
+                    logger.info("No songs in user's playlists, using default recommendations")
+                    recommendations = get_default_recommendations(df_scaled)
+            else:
+                logger.info("User songs not requested, using default recommendations")
+                recommendations = get_default_recommendations(df_scaled)
             
-            # Try DQN model first
-            try:
-                model_path = f"models/dqn_{user_id}.pth"
-                if os.path.exists(model_path):
-                    mood_state = convert_mood_to_state(mood)
-                    recommendations = get_dqn_recommendations(user_id, mood_state, df_scaled)
-                    if recommendations is not None and len(recommendations) > 0:
-                        logger.info("Using DQN recommendations")
-                        return recommendations
-            except Exception as e:
-                logger.warning("DQN failed - falling back to similarity")
-            
-            # Fallback to similarity-based recommendations
-            recommendations = process_user_history(history, mood)
-            logger.info("Using similarity-based recommendations")
+            logger.info(f"\nGenerated {len(recommendations)} total recommendations")
             return recommendations
-        else:
-            logger.info("Using default recommendations")
-            return get_default_recommendations(df_scaled)
+            
+        finally:
+            session.close()
             
     except Exception as e:
-        logger.error(f"Recommendation error: {e}")
+        logger.error(f"Error generating recommendations: {str(e)}", exc_info=True)
+        raise
+
+def combine_recommendations(dqn_recs, similarity_recs, dqn_weight=0.7):
+    """Combine DQN and similarity-based recommendations."""
+    logger.info("\n=== Combining Recommendations ===")
+    logger.info(f"DQN recommendations: {len(dqn_recs)}")
+    logger.info(f"Similarity recommendations: {len(similarity_recs)}")
+    
+    try:
+        # Combine and weight recommendations
+        combined = []
+        seen_songs = set()
+        
+        # Add DQN recommendations first
+        for rec in dqn_recs:
+            if rec['song_id'] not in seen_songs:
+                rec['score'] = rec.get('score', 0) * dqn_weight
+                combined.append(rec)
+                seen_songs.add(rec['song_id'])
+        
+        # Add similarity recommendations
+        for rec in similarity_recs:
+            if rec['song_id'] not in seen_songs:
+                rec['score'] = rec.get('similarity', 0) * (1 - dqn_weight)
+                combined.append(rec)
+                seen_songs.add(rec['song_id'])
+        
+        # Sort by score
+        combined.sort(key=lambda x: x.get('score', 0), reverse=True)
+        
+        logger.info(f"Combined {len(combined)} unique recommendations")
+        return combined
+        
+    except Exception as e:
+        logger.error(f"Error combining recommendations: {str(e)}", exc_info=True)
         raise
 
 def process_user_history(history, mood=None):
@@ -446,53 +514,100 @@ def get_initial_recommendations(user_id, use_user_songs=True, df_scaled=None):
         logger.error(f"Error in initial recommendations: {e}")
         return get_default_recommendations(df_scaled)
 
-def get_similarity_based_recommendations(user_songs, df_scaled, n_new_recommendations=10, n_familiar_recommendations=5):
+def get_similarity_based_recommendations(user_songs, df_scaled=None, n_new_recommendations=10, n_familiar_recommendations=5):
     """Get recommendations based on cosine similarity with user's playlist songs."""
-    logger.info("Generating similarity-based recommendations")
+    if df_scaled is None:
+        df_scaled = get_dataset()
+    
+    logger.info("\n=== Generating Similarity-based Recommendations ===")
+    logger.info(f"User songs count: {len(user_songs)}")
     
     try:
         features = ['energy', 'acousticness', 'valence', 'tempo', 'speechiness', 'instrumentalness']
         
-        # Get user songs features
+        # Log the dataset info
+        logger.info("\nDataset Information:")
+        logger.info(f"Total songs in dataset: {len(df_scaled)}")
+        logger.info(f"Dataset columns: {df_scaled.columns.tolist()}")
+        
+        # Get user songs features and log details
         user_songs_df = df_scaled[df_scaled['song_id'].isin(user_songs)]
+        logger.info("\nUser's playlist songs from dataset:")
+        for _, song in user_songs_df.iterrows():
+            logger.info(f"- Song ID: {song['song_id']}")
+            logger.info(f"  Track: {song['track_name']}")
+            logger.info(f"  Artist: {song['artist_name']}")
+            logger.info(f"  Original ID in user_songs list: {[id for id in user_songs if id == song['song_id']]}")
+        
+        # Log any missing songs
+        missing_songs = set(user_songs) - set(user_songs_df['song_id'].tolist())
+        if missing_songs:
+            logger.warning(f"\nSongs in user's playlist not found in dataset: {missing_songs}")
+        
         if user_songs_df.empty:
+            logger.warning("No user songs found in dataset, falling back to defaults")
             return get_default_recommendations(df_scaled)
             
-        # Calculate similarity for new recommendations
+        # Add verification step
+        logger.info("\nVerifying song details between DB and dataset:")
+        session = get_session()
+        try:
+            for song_id in user_songs:
+                db_song = session.query(Song).filter_by(song_id=song_id).first()
+                dataset_song = df_scaled[df_scaled['song_id'] == song_id]
+                
+                if db_song and not dataset_song.empty:
+                    logger.info(f"\nSong ID: {song_id}")
+                    logger.info(f"Database:")
+                    logger.info(f"  Track: {db_song.track_name}")
+                    logger.info(f"  Artist: {db_song.artists}")
+                    logger.info(f"Dataset:")
+                    logger.info(f"  Track: {dataset_song.iloc[0]['track_name']}")
+                    logger.info(f"  Artist: {dataset_song.iloc[0]['artist_name']}")
+        finally:
+            session.close()
+            
+        # Calculate similarity
         similarity_matrix = cosine_similarity(
             df_scaled[features],
             user_songs_df[features]
         )
         
-        # Get average similarity scores
+        # Get recommendations
         similarity_scores = np.mean(similarity_matrix, axis=1)
         df_scaled['similarity'] = similarity_scores
         
-        # Get new recommendations (excluding user's songs)
         new_recommendations = df_scaled[~df_scaled['song_id'].isin(user_songs)]\
             .nlargest(n_new_recommendations, 'similarity')
             
-        # For initial recommendations, randomly select familiar songs
-        # since we don't have a model to predict preferences yet
+        logger.info("\nNew recommended songs:")
+        for _, song in new_recommendations.iterrows():
+            logger.info(f"- Song ID: {song['song_id']}")
+            logger.info(f"  Track: {song['track_name']}")
+            logger.info(f"  Artist: {song['artist_name']}")
+            logger.info(f"  Similarity: {song['similarity']:.3f}")
+
+        # Get familiar recommendations
         familiar_recommendations = user_songs_df.sample(
             n=min(n_familiar_recommendations, len(user_songs_df))
         ) if not user_songs_df.empty else df_scaled[df_scaled['song_id'].isin(fallback_user_songs)]\
             .sample(n=n_familiar_recommendations)
             
-        # Combine recommendations
-        recommendations = pd.concat([new_recommendations, familiar_recommendations])
-        
-        # Structure the recommendations
+        logger.info("\nFamiliar recommended songs:")
+        for _, song in familiar_recommendations.iterrows():
+            logger.info(f"- Song ID: {song['song_id']}")
+            logger.info(f"  Track: {song['track_name']}")
+            logger.info(f"  Artist: {song['artist_name']}")
+
         recommendations = {
             'new_songs': new_recommendations.to_dict('records'),
             'user_songs': familiar_recommendations.to_dict('records')
         }
         
-        logger.info(f"Generated {len(new_recommendations)} new and {len(familiar_recommendations)} user playlist songs")
         return recommendations
         
     except Exception as e:
-        logger.error(f"Error in similarity recommendations: {e}")
+        logger.error(f"Error in similarity recommendations: {str(e)}", exc_info=True)
         return get_default_recommendations(df_scaled)
 
 def get_dqn_based_recommendations(user_id, df_scaled, current_mood=None):
@@ -586,24 +701,6 @@ def get_dqn_recommendations(user_id, state, df_scaled, top_n=10):
         logging.error(f"Error getting DQN recommendations: {e}")
         raise
 
-def load_and_get_dataset():
-    """Load and return the preprocessed dataset."""
-    try:
-        dataset_path = "/Users/sriujjwalreddyb/Amano/spotify_Song_Dataset/final_dataset.csv"
-        logger.info(f"Loading dataset from {dataset_path}")
-        
-        if not os.path.exists(dataset_path):
-            logger.error(f"Dataset file not found at {dataset_path}")
-            raise FileNotFoundError(f"Dataset not found at {dataset_path}")
-            
-        df = pd.read_csv(dataset_path)
-        logger.info(f"Successfully loaded dataset with {len(df)} records")
-        return df
-        
-    except Exception as e:
-        logger.error(f"Error loading dataset: {e}")
-        raise
-
 def run_background_training(user_id, df_scaled=None, features=None, feature_weights=None):
     """
     Run background DQN training for a user based on their feedback history.
@@ -613,7 +710,7 @@ def run_background_training(user_id, df_scaled=None, features=None, feature_weig
     try:
         if df_scaled is None:
             logger.info("Loading dataset as it wasn't provided")
-            df_scaled = load_and_get_dataset()
+            df_scaled = get_dataset()
             
         if features is None:
             features = ['energy', 'acousticness', 'valence', 'tempo', 'speechiness', 'instrumentalness']

@@ -194,35 +194,25 @@ export default function RecommendationPage() {
 
     const fetchPlaylists = async () => {
       try {
-        const userId = sessionStorage.getItem("user_id");
-        console.debug("Fetching playlists for user:", userId);
-        
-        if (!userId) {
-          console.warn("No user ID found in session");
-          return;
-        }
-
         const response = await fetch(`${API_URL}/playlists/get`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ user_id: userId })
+          body: JSON.stringify({
+            user_id: userId
+          })
         });
-        
-        console.debug("Playlists response status:", response.status);
-        
+
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(`Server error: ${errorData.error || response.statusText}`);
+          throw new Error('Failed to fetch playlists');
         }
 
         const data = await response.json();
-        console.debug("Playlists fetched:", data);
         setPlaylists(data.playlists || []);
       } catch (error) {
-        console.error("Error fetching playlists:", error.message);
-        setMessage("Failed to fetch playlists. Please try again.");
+        console.error('Error fetching playlists:', error);
+        setMessage('Failed to fetch playlists');
       }
     };
 
@@ -367,8 +357,8 @@ export default function RecommendationPage() {
   };
 
   const handleAddPlaylist = async () => {
-    if (!playlistName.trim()) {
-      setMessage("Please enter a playlist name");
+    if (!playlistName.trim() || selectedSongs.length === 0) {
+      setMessage("Please enter a playlist name and select songs");
       return;
     }
 
@@ -391,12 +381,14 @@ export default function RecommendationPage() {
 
       if (response.ok) {
         setMessage(editingPlaylist ? "Playlist updated successfully!" : "Playlist created successfully!");
-        // Refresh playlists
-        fetchPlaylists();
+        
         // Reset form
         setPlaylistName("");
         setSelectedSongs([]);
         setEditingPlaylist(null);
+
+        // Refresh the page and then fetch playlists
+        window.location.reload();
       } else {
         const data = await response.json();
         setMessage(data.error || "Failed to save playlist");

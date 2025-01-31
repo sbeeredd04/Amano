@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, BLOB, ForeignKey  # Added ForeignKey import
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import Column, Integer, String, BLOB, ForeignKey, Float, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
+from datetime import datetime
 
-class Base(DeclarativeBase):
-    pass
+Base = declarative_base()
 
 class User(Base):
     __tablename__ = 'users'
@@ -26,27 +27,28 @@ class User(Base):
 
 class Song(Base):
     __tablename__ = 'songs'
-    
-    song_id = Column(Integer, primary_key=True)
-    track_id = Column(String(22))
-    artists = Column(String(100))
-    track_name = Column(String(100))
-    album_name = Column(String(100))
-    track_genre = Column(String(100))
+
+    song_id = Column(Integer, primary_key=True)  # This should match the song_id from dataset
+    track_id = Column(String)  # Keep track_id as a regular column
+    artists = Column(String)
+    track_name = Column(String)
+    album_name = Column(String)
+    track_genre = Column(String)
     popularity = Column(Integer)
     features = Column(BLOB)  # Store features as a serialized binary object
 
+    def __repr__(self):
+        return f"<Song(song_id={self.song_id}, track_name='{self.track_name}', artists='{self.artists}')>"
+
     def serialize(self):
-        """Convert the song object to a dictionary for JSON serialization"""
         return {
             'song_id': self.song_id,
             'track_id': self.track_id,
-            'artists': self.artists,
             'track_name': self.track_name,
+            'artist_name': self.artists,
             'album_name': self.album_name,
             'track_genre': self.track_genre,
             'popularity': self.popularity
-            # Excluding features as it's a BLOB
         }
 
 class UserHistory(Base):

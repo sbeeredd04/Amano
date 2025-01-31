@@ -74,34 +74,59 @@ def get_playlists():
 # Add a new playlist with selected songs
 @playlists_bp.route('/add', methods=['POST'])
 def add_playlist():
+    logger.info("\n=== Adding New Playlist ===")
+    
     data = request.json
     user_id = data.get('user_id')
     name = data.get('name')
     description = data.get('description', '')
     song_ids = data.get('song_ids', [])
 
-    if not user_id or not name:
-        return jsonify({"error": "Missing required fields (user_id or name)"}), 400
+    logger.info(f"Request Details:")
+    logger.info(f"- User ID: {user_id}")
+    logger.info(f"- Playlist Name: {name}")
+    logger.info(f"- Description: {description}")
+    logger.info(f"- Number of Songs: {len(song_ids)}")
+    logger.info(f"- Song IDs: {song_ids}")
 
     session = get_session()
     try:
+        # Log song details before adding
+        songs_info = session.query(Song).filter(Song.song_id.in_(song_ids)).all()
+        logger.info("\nSongs being added to playlist:")
+        for song in songs_info:
+            logger.info(f"- Song ID: {song.song_id}")
+            logger.info(f"  Track: {song.track_name}")
+            logger.info(f"  Artist: {song.artists}")
+            logger.info(f"  Genre: {song.track_genre}")
+
         new_playlist = Playlist(user_id=user_id, name=name, description=description)
         session.add(new_playlist)
         session.commit()
+        
+        logger.info(f"\nCreated new playlist:")
+        logger.info(f"- Playlist ID: {new_playlist.playlist_id}")
+        logger.info(f"- Name: {new_playlist.name}")
 
         # Add songs to playlist
         for song_id in song_ids:
-            session.add(PlaylistSong(playlist_id=new_playlist.playlist_id, song_id=song_id))
+            playlist_song = PlaylistSong(playlist_id=new_playlist.playlist_id, song_id=song_id)
+            session.add(playlist_song)
+            logger.info(f"Added song {song_id} to playlist {new_playlist.playlist_id}")
 
         session.commit()
-        logger.debug(f"Playlist '{name}' added for user_id {user_id} with {len(song_ids)} songs.")
-        return jsonify({"message": "Playlist added successfully", "playlist": new_playlist.serialize()}), 201
+        logger.info(f"\nSuccessfully created playlist with {len(song_ids)} songs")
+        
+        return jsonify({
+            "message": "Playlist added successfully", 
+            "playlist": new_playlist.serialize()
+        }), 201
 
     except Exception as e:
         session.rollback()
-        logger.error(f"Error adding playlist for user_id {user_id}: {e}")
+        logger.error(f"Error adding playlist: {str(e)}")
+        logger.error(f"Error details:", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
     finally:
         session.close()
 
@@ -109,6 +134,7 @@ def add_playlist():
 # Fetch all songs with pagination, filtering, and search
 @playlists_bp.route('/songs', methods=['GET'])
 def get_songs():
+    logger.info("\n=== Fetching Songs for Frontend ===")
     session = get_session()
     try:
         # Get and validate parameters
@@ -116,8 +142,10 @@ def get_songs():
         search = request.args.get('search', '').strip()
         search_type = request.args.get('type', 'track')
         
+        logger.info(f"Query Parameters - Genre: {genre}, Search: {search}, Type: {search_type}")
+        
         try:
-            limit = int(request.args.get('limit', 20))  # Changed default to 20
+            limit = int(request.args.get('limit', 20))
             offset = int(request.args.get('offset', 0))
         except (ValueError, TypeError):
             limit = 20
@@ -125,23 +153,36 @@ def get_songs():
 
         # Build query
         query = session.query(Song)
+        logger.info("Initial song query built")
 
-        # Apply filters
+        # Apply filters and log
         if genre and genre.lower() != 'all':
+            logger.info(f"Filtering by genre: {genre}")
             query = query.filter(Song.track_genre.ilike(f"%{genre}%"))
 
         if search:
             if search_type == 'artist':
+                logger.info(f"Filtering by artist: {search}")
                 query = query.filter(Song.artists.ilike(f"%{search}%"))
             else:
+                logger.info(f"Filtering by track name: {search}")
                 query = query.filter(Song.track_name.ilike(f"%{search}%"))
             
         # Get total count before pagination
         total_count = query.count()
+        logger.info(f"Total matching songs: {total_count}")
         
         # Apply pagination
         songs = query.order_by(Song.popularity.desc()).offset(offset).limit(limit).all()
         
+        # Log song details being sent to frontend
+        logger.info("\nSongs being sent to frontend:")
+        for song in songs:
+            logger.info(f"- Song ID: {song.song_id}")
+            logger.info(f"  Track: {song.track_name}")
+            logger.info(f"  Artist: {song.artists}")
+            logger.info(f"  Genre: {song.track_genre}")
+
         # Serialize results
         serialized_songs = [{
             'song_id': song.song_id,
@@ -152,20 +193,19 @@ def get_songs():
             'popularity': song.popularity
         } for song in songs]
 
-        logger.info(f"Fetched {len(songs)} songs (offset: {offset}, limit: {limit})")
+        logger.info(f"Successfully serialized {len(songs)} songs for frontend")
         return jsonify({
             "songs": serialized_songs,
             "total_count": total_count
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in get_songs: {e}")
+        logger.error(f"Error fetching songs: {str(e)}", exc_info=True)
         return jsonify({
             "error": str(e),
             "songs": [],
             "total_count": 0
         }), 500
-
     finally:
         session.close()
 

@@ -5,13 +5,13 @@ from services.recommendation_service import (
     fetch_user_history_and_recommend, 
     update_user_mood,
     get_user_mood,
-    get_initial_recommendations,
-    load_and_get_dataset
+    get_initial_recommendations
 )
+from utils.db import get_dataset
 import pandas as pd
 import os
 from utils.db import get_session
-from models.song_model import UserMood, UserHistory
+from models.song_model import UserMood, UserHistory, Playlist, Song
 import logging
 from flask_cors import CORS
 
@@ -29,7 +29,7 @@ CORS(recommendation_bp,
 # Load the preprocessed dataset
 try:
     logger.info("Loading dataset...")
-    df_scaled = load_and_get_dataset()
+    df_scaled = get_dataset()
     logger.info(f"Dataset loaded successfully with {len(df_scaled)} records")
 except Exception as e:
     logger.error(f"Error loading dataset: {e}")
@@ -79,40 +79,39 @@ def get_initial_recommendations_route():
 
 @recommendation_bp.route('/refresh', methods=['POST'])
 def refresh_recommendations():
-    """
-    Endpoint to refresh recommendations based on user feedback and mood.
-    """
-    logger.info("=== Recommendation Refresh ===")
+    """Endpoint to refresh recommendations based on user feedback and mood."""
+    logger.info("\n=== Recommendation Refresh ===")
     try:
         data = request.json
         user_id = data.get('user_id')
         mood = data.get('mood')
         use_user_songs = data.get('use_user_songs', True)
         
+        logger.info(f"Request data - User ID: {user_id}, Mood: {mood}, Use User Songs: {use_user_songs}")
+        
         if not user_id:
-            logger.error("Missing user_id")
-            return jsonify({"error": "Invalid request, missing user_id"}), 400
+            return jsonify({"error": "User ID is required"}), 400
 
         session = get_session()
-        user_history_count = session.query(UserHistory).filter_by(user_id=user_id).count()
-        
-        recommendations = fetch_user_history_and_recommend(
-            user_id=user_id,
-            mood=mood,
-            use_user_songs=use_user_songs
-        )
-        
-        logger.info(f"Generated {len(recommendations)} recommendations for user {user_id}")
-        return jsonify({
-            "recommendations": recommendations,
-            "source": "user_playlist" if use_user_songs else "default_songs"
-        }), 200
+        try:
+            # Get user's playlists
+            playlists = session.query(Playlist).filter_by(user_id=user_id).all()
+            logger.info(f"Found {len(playlists)} playlists for user {user_id}")
+            
+            recommendations = fetch_user_history_and_recommend(user_id, mood, use_user_songs)
+            logger.info(f"Generated {len(recommendations)} recommendations")
+            
+            return jsonify({"recommendations": recommendations}), 200
+            
+        except Exception as e:
+            logger.error(f"Database error: {str(e)}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+        finally:
+            session.close()
 
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
+        logger.error(f"Request error: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-    finally:
-        session.close()
 
 @recommendation_bp.route('/feedback', methods=['POST'])
 def handle_feedback():

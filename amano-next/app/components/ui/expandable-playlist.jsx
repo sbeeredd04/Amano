@@ -9,6 +9,26 @@ export const ExpandablePlaylist = ({ playlists, onEdit, onDelete, onRemoveSong }
   const ref = useRef(null);
   const id = useId();
 
+  // Placeholder playlists for empty state
+  const placeholderPlaylists = [
+    {
+      name: "Your First Playlist",
+      description: "Start creating your personal music collection"
+    },
+    {
+      name: "Workout Mix",
+      description: "Add energetic songs for your workout sessions"
+    },
+    {
+      name: "Chill Vibes",
+      description: "Create a relaxing playlist for unwinding"
+    },
+    {
+      name: "Study Focus",
+      description: "Curate songs that help you concentrate"
+    }
+  ];
+
   useEffect(() => {
     function onKeyDown(event) {
       if (event.key === "Escape") {
@@ -179,29 +199,71 @@ export const ExpandablePlaylist = ({ playlists, onEdit, onDelete, onRemoveSong }
 
       {/* Playlist Cards List */}
       <div className="grid gap-4">
-        {playlists.map((playlist) => (
-          <motion.div
-            layoutId={`card-${playlist.playlist_id}-${id}`}
-            key={playlist.playlist_id}
-            onClick={() => setActive(playlist)}
-            className="bg-black/40 backdrop-blur-sm border border-white/10 rounded-xl p-6 cursor-pointer hover:bg-black/60 transition-colors"
-          >
+        {playlists && playlists.length > 0 ? (
+          // Show actual playlists if they exist
+          playlists.map((playlist) => (
             <motion.div
-              layoutId={`header-${playlist.playlist_id}-${id}`}
-              className="flex justify-between items-center"
+              layoutId={`card-${playlist.playlist_id}-${id}`}
+              key={playlist.playlist_id}
+              onClick={() => setActive(playlist)}
+              className="bg-black/40 backdrop-blur-sm border border-white/10 rounded-xl p-6 cursor-pointer hover:bg-black/60 transition-colors"
             >
-              <motion.h3
-                layoutId={`title-${playlist.playlist_id}-${id}`}
-                className="text-xl font-semibold text-white"
+              <motion.div
+                layoutId={`header-${playlist.playlist_id}-${id}`}
+                className="flex justify-between items-center"
               >
-                {playlist.name}
-              </motion.h3>
-              <span className="text-sm text-gray-400">
-                {playlist.songs?.length || 0} songs
-              </span>
+                <motion.h3
+                  layoutId={`title-${playlist.playlist_id}-${id}`}
+                  className="text-xl font-semibold text-white"
+                >
+                  {playlist.name}
+                </motion.h3>
+                <span className="text-sm text-gray-400">
+                  {playlist.songs?.length || 0} songs
+                </span>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        ))}
+          ))
+        ) : (
+          // Show placeholder cards if no playlists exist
+          <>
+            <div className="text-center mb-8">
+              <h3 className="text-xl text-gray-400 mb-2">No Playlists Yet</h3>
+              <p className="text-sm text-gray-500">
+                Create your first playlist to start organizing your music
+              </p>
+            </div>
+            <div className="grid gap-4">
+              {placeholderPlaylists.map((placeholder, index) => (
+                <div
+                  key={index}
+                  className="bg-black/20 backdrop-blur-sm border border-white/5 rounded-xl p-6 cursor-default"
+                >
+                  <div className="flex flex-col">
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="text-xl font-semibold text-gray-400">
+                        {placeholder.name}
+                      </h3>
+                      <span className="text-sm text-gray-500">0 songs</span>
+                    </div>
+                    <p className="text-sm text-gray-500">{placeholder.description}</p>
+                    <div className="mt-4 flex justify-end">
+                      <button 
+                        onClick={() => {
+                          // You can add a callback here to handle new playlist creation
+                          console.log(`Create new playlist: ${placeholder.name}`);
+                        }}
+                        className="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg transition-colors text-sm"
+                      >
+                        Create Playlist
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </>
   );
