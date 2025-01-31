@@ -82,45 +82,34 @@ def refresh_recommendations():
     """
     Endpoint to refresh recommendations based on user feedback and mood.
     """
-    logger.info("=== Starting Recommendation Refresh Process ===")
+    logger.info("=== Recommendation Refresh ===")
     try:
         data = request.json
         user_id = data.get('user_id')
         mood = data.get('mood')
         use_user_songs = data.get('use_user_songs', True)
         
-        logger.info(f"Request Parameters:")
-        logger.info(f"- User ID: {user_id}")
-        logger.info(f"- Mood: {mood}")
-        logger.info(f"- Using User Songs: {use_user_songs}")
-        
         if not user_id:
-            logger.error("Missing user_id in request")
+            logger.error("Missing user_id")
             return jsonify({"error": "Invalid request, missing user_id"}), 400
 
-        # Check if user exists and has history
         session = get_session()
         user_history_count = session.query(UserHistory).filter_by(user_id=user_id).count()
-        logger.info(f"User has {user_history_count} historical interactions")
-
-        # Get new recommendations
-        logger.info("Calling fetch_user_history_and_recommend")
+        
         recommendations = fetch_user_history_and_recommend(
             user_id=user_id,
             mood=mood,
             use_user_songs=use_user_songs
         )
         
-        logger.info(f"Received {len(recommendations)} recommendations")
-        logger.debug(f"First 3 recommendations: {recommendations[:3]}")
-
+        logger.info(f"Generated {len(recommendations)} recommendations for user {user_id}")
         return jsonify({
             "recommendations": recommendations,
             "source": "user_playlist" if use_user_songs else "default_songs"
         }), 200
 
     except Exception as e:
-        logger.error(f"Error in refresh_recommendations: {str(e)}", exc_info=True)
+        logger.error(f"Error: {str(e)}")
         return jsonify({"error": str(e)}), 500
     finally:
         session.close()

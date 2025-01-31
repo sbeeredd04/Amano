@@ -108,19 +108,19 @@ def add_playlist():
 
 # Fetch all songs with pagination, filtering, and search
 @playlists_bp.route('/songs', methods=['GET'])
-def get_all_songs():
+def get_songs():
     session = get_session()
     try:
-        # Get and validate parameters with detailed logging
+        # Get and validate parameters
         genre = request.args.get('genre', '').strip()
         search = request.args.get('search', '').strip()
-        search_type = request.args.get('search_type', 'track')
+        search_type = request.args.get('type', 'track')
         
         try:
-            limit = int(request.args.get('limit', 12))  # Changed default to 12
+            limit = int(request.args.get('limit', 20))  # Changed default to 20
             offset = int(request.args.get('offset', 0))
         except (ValueError, TypeError):
-            limit = 12
+            limit = 20
             offset = 0
 
         # Build query
@@ -135,17 +135,16 @@ def get_all_songs():
                 query = query.filter(Song.artists.ilike(f"%{search}%"))
             else:
                 query = query.filter(Song.track_name.ilike(f"%{search}%"))
-
+            
         # Get total count before pagination
         total_count = query.count()
-
+        
         # Apply pagination
         songs = query.order_by(Song.popularity.desc()).offset(offset).limit(limit).all()
-
+        
         # Serialize results
         serialized_songs = [{
             'song_id': song.song_id,
-            'track_id': song.track_id,
             'track_name': song.track_name,
             'artist_name': song.artists,
             'album_name': song.album_name,
@@ -153,13 +152,14 @@ def get_all_songs():
             'popularity': song.popularity
         } for song in songs]
 
+        logger.info(f"Fetched {len(songs)} songs (offset: {offset}, limit: {limit})")
         return jsonify({
             "songs": serialized_songs,
             "total_count": total_count
         }), 200
-
+        
     except Exception as e:
-        logger.error(f"Error in get_all_songs: {e}")
+        logger.error(f"Error in get_songs: {e}")
         return jsonify({
             "error": str(e),
             "songs": [],
@@ -400,5 +400,35 @@ def remove_song():
         logger.error(f"Error removing song from playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
+    finally:
+        session.close()
+
+def get_all_user_playlist_songs(user_id):
+    """
+    Get all unique songs from all playlists of a user.
+    """
+    logger.info(f"Fetching all songs from all playlists for user {user_id}")
+    
+    session = get_session()
+    try:
+        # Get all playlists for the user
+        playlists = session.query(Playlist).filter_by(user_id=user_id).all()
+        logger.info(f"Found {len(playlists)} playlists")
+        
+        # Get all unique songs from all playlists
+        all_songs = set()
+        for playlist in playlists:
+            songs = session.query(Song)\
+                .join(PlaylistSong)\
+                .filter(PlaylistSong.playlist_id == playlist.playlist_id)\
+                .all()
+            all_songs.update(song.song_id for song in songs)
+        
+        logger.info(f"Total unique songs across all playlists: {len(all_songs)}")
+        return list(all_songs)
+        
+    except Exception as e:
+        logger.error(f"Error fetching user playlist songs: {e}")
+        return []
     finally:
         session.close()

@@ -11,7 +11,7 @@ import numpy as np
 from sqlalchemy import select
 from models.song_model import Song, UserHistory, UserMood
 from utils.db import get_session
-from server.routes.playlist import get_user_songs
+from server.routes.playlist import get_user_songs, get_all_user_playlist_songs
 import logging
 import os
 
@@ -154,60 +154,43 @@ def fetch_user_history_and_recommend(user_id, mood=None, use_user_songs=True, df
     """
     Fetch user history and generate recommendations.
     """
-    logger.info("=== Starting Recommendation Generation ===")
-    logger.info(f"Parameters: user_id={user_id}, mood={mood}, use_user_songs={use_user_songs}")
+    logger.info(f"Generating recommendations for user {user_id}")
     
     if df_scaled is None:
-        logger.info("Loading dataset as it wasn't provided")
         df_scaled = load_and_get_dataset()
     
     try:
         session = get_session()
         
         if use_user_songs:
-            logger.info("Using user's song history for recommendations")
             history = session.query(UserHistory).filter_by(user_id=user_id).all()
             
             if not history:
-                logger.info("No user history found, falling back to default recommendations")
+                logger.info("No history found - using defaults")
                 return get_default_recommendations(df_scaled)
-            
-            logger.info(f"Found {len(history)} historical interactions")
             
             # Try DQN model first
             try:
-                logger.info("Attempting to use DQN model for recommendations")
                 model_path = f"models/dqn_{user_id}.pth"
-                
                 if os.path.exists(model_path):
-                    logger.info("Found existing DQN model")
-                    # Convert mood to state
                     mood_state = convert_mood_to_state(mood)
-                    logger.info(f"Converted mood '{mood}' to state: {mood_state}")
-                    
                     recommendations = get_dqn_recommendations(user_id, mood_state, df_scaled)
                     if recommendations is not None and len(recommendations) > 0:
-                        logger.info("Successfully generated DQN recommendations")
-                        logger.debug(f"First 3 DQN recommendations: {recommendations[:3]}")
+                        logger.info("Using DQN recommendations")
                         return recommendations
-                else:
-                    logger.info("No DQN model found for user")
             except Exception as e:
-                logger.warning(f"DQN recommendation failed: {e}", exc_info=True)
+                logger.warning("DQN failed - falling back to similarity")
             
             # Fallback to similarity-based recommendations
-            logger.info("Falling back to similarity-based recommendations")
             recommendations = process_user_history(history, mood)
-            logger.info(f"Generated {len(recommendations)} similarity-based recommendations")
+            logger.info("Using similarity-based recommendations")
             return recommendations
         else:
             logger.info("Using default recommendations")
-            recommendations = get_default_recommendations(df_scaled)
-            logger.info(f"Generated {len(recommendations)} default recommendations")
-            return recommendations
+            return get_default_recommendations(df_scaled)
             
     except Exception as e:
-        logger.error(f"Error in fetch_user_history_and_recommend: {e}", exc_info=True)
+        logger.error(f"Recommendation error: {e}")
         raise
 
 def process_user_history(history, mood=None):
@@ -433,49 +416,151 @@ def get_next_state_and_reward(action, recommended_songs_df):
 
 def get_initial_recommendations(user_id, use_user_songs=True, df_scaled=None):
     """
-    Get initial recommendations based on user's playlist history or default songs.
-    Args:
-        user_id: The user's ID
-        use_user_songs: Whether to use user's song history
-        df_scaled: Pre-loaded scaled dataset (optional)
+    Get initial recommendations based on either user's playlist songs or default songs.
     """
-    logger.info(f"Getting initial recommendations for user {user_id}")
+    logger.info(f"=== Getting Initial Recommendations for User {user_id} ===")
+    logger.info(f"Using user songs: {use_user_songs}")
+    
     try:
-        session = get_session()
-        
+        # Check for existing DQN model
+        model_path = f"models/dqn_{user_id}.pth"
+        if os.path.exists(model_path):
+            logger.info("Found existing DQN model - using it for recommendations")
+            return get_dqn_based_recommendations(user_id, df_scaled)
+            
+        # If no model exists, proceed with initial recommendation logic
         if use_user_songs:
-            # Check if user has any history
-            user_history = session.query(UserHistory).filter_by(user_id=user_id).all()
-            if user_history:
-                logger.info("User has history, using personalized recommendations")
-                # Use user's history for recommendations
-                return fetch_user_history_and_recommend(
-                    user_id=user_id,
-                    use_user_songs=True,
-                    df_scaled=df_scaled
-                )
-        
-        # If no user history or use_user_songs is False, use default recommendations
-        logger.info("Using default recommendations")
+            # Get all songs from user's playlists
+            user_songs = get_all_user_playlist_songs(user_id)
+            if not user_songs:
+                logger.info("No user playlist songs found - using defaults")
+                return get_default_recommendations(df_scaled)
+                
+            logger.info(f"Found {len(user_songs)} songs in user's playlists")
+            return get_similarity_based_recommendations(user_songs, df_scaled)
+        else:
+            logger.info("Using default recommendations")
+            return get_default_recommendations(df_scaled)
+            
+    except Exception as e:
+        logger.error(f"Error in initial recommendations: {e}")
         return get_default_recommendations(df_scaled)
+
+def get_similarity_based_recommendations(user_songs, df_scaled, n_new_recommendations=10, n_familiar_recommendations=5):
+    """Get recommendations based on cosine similarity with user's playlist songs."""
+    logger.info("Generating similarity-based recommendations")
+    
+    try:
+        features = ['energy', 'acousticness', 'valence', 'tempo', 'speechiness', 'instrumentalness']
+        
+        # Get user songs features
+        user_songs_df = df_scaled[df_scaled['song_id'].isin(user_songs)]
+        if user_songs_df.empty:
+            return get_default_recommendations(df_scaled)
+            
+        # Calculate similarity for new recommendations
+        similarity_matrix = cosine_similarity(
+            df_scaled[features],
+            user_songs_df[features]
+        )
+        
+        # Get average similarity scores
+        similarity_scores = np.mean(similarity_matrix, axis=1)
+        df_scaled['similarity'] = similarity_scores
+        
+        # Get new recommendations (excluding user's songs)
+        new_recommendations = df_scaled[~df_scaled['song_id'].isin(user_songs)]\
+            .nlargest(n_new_recommendations, 'similarity')
+            
+        # For initial recommendations, randomly select familiar songs
+        # since we don't have a model to predict preferences yet
+        familiar_recommendations = user_songs_df.sample(
+            n=min(n_familiar_recommendations, len(user_songs_df))
+        ) if not user_songs_df.empty else df_scaled[df_scaled['song_id'].isin(fallback_user_songs)]\
+            .sample(n=n_familiar_recommendations)
+            
+        # Combine recommendations
+        recommendations = pd.concat([new_recommendations, familiar_recommendations])
+        
+        # Structure the recommendations
+        recommendations = {
+            'new_songs': new_recommendations.to_dict('records'),
+            'user_songs': familiar_recommendations.to_dict('records')
+        }
+        
+        logger.info(f"Generated {len(new_recommendations)} new and {len(familiar_recommendations)} user playlist songs")
+        return recommendations
         
     except Exception as e:
-        logger.error(f"Error getting initial recommendations: {e}")
-        raise
-    finally:
-        session.close()
+        logger.error(f"Error in similarity recommendations: {e}")
+        return get_default_recommendations(df_scaled)
 
-def get_default_recommendations(df_scaled):
-    """Get default recommendations."""
-    logger.info("Generating default recommendations")
+def get_dqn_based_recommendations(user_id, df_scaled, current_mood=None):
+    """Get recommendations using the trained DQN model."""
     try:
-        # Sample random songs
-        recommendations = df_scaled.sample(n=10).to_dict('records')
-        logger.info(f"Generated {len(recommendations)} default recommendations")
-        logger.debug(f"First 3 default recommendations: {recommendations[:3]}")
+        # Get all user playlist songs and similar songs
+        user_songs = get_all_user_playlist_songs(user_id)
+        similar_songs = get_similarity_based_recommendations(user_songs, df_scaled, n_recommendations=20)
+        
+        # Prepare candidate songs
+        user_songs_df = df_scaled[df_scaled['song_id'].isin(user_songs)]
+        new_songs_df = pd.DataFrame(similar_songs['new_songs'])
+        
+        # Use DQN to predict rewards for all songs
+        model = DQN(state_size=9, action_size=len(df_scaled))
+        model.load_state_dict(torch.load(f"models/dqn_{user_id}.pth"))
+        model.eval()
+        
+        mood_state = convert_mood_to_state(current_mood)
+        state_tensor = torch.tensor(get_initial_state(mood_state), dtype=torch.float32)
+        
+        with torch.no_grad():
+            # Predict for new songs
+            new_predictions = model(state_tensor)
+            new_songs_df['predicted_reward'] = new_predictions[:len(new_songs_df)].numpy()
+            
+            # Predict for user songs
+            user_predictions = model(state_tensor)
+            user_songs_df = pd.DataFrame(similar_songs['user_songs'])
+            user_songs_df['predicted_reward'] = user_predictions[:len(user_songs_df)].numpy()
+        
+        # Get top recommendations from both sets
+        new_recommendations = new_songs_df.nlargest(n_new_recommendations, 'predicted_reward')
+        familiar_recommendations = user_songs_df.nlargest(n_familiar_recommendations, 'predicted_reward')
+        
+        # Combine recommendations
+        recommendations = pd.concat([new_recommendations, familiar_recommendations])
+        
+        # Structure the recommendations
+        recommendations = {
+            'new_songs': new_recommendations.to_dict('records'),
+            'user_songs': familiar_recommendations.to_dict('records')
+        }
+        
+        logger.info(f"Generated {len(new_recommendations)} new and {len(familiar_recommendations)} user playlist songs")
         return recommendations
+        
     except Exception as e:
-        logger.error(f"Error getting default recommendations: {e}", exc_info=True)
+        logger.error(f"Error in DQN recommendations: {e}")
+        return get_similarity_based_recommendations(user_songs, df_scaled)
+
+def get_default_recommendations(df_scaled, n_total=15):
+    """Get recommendations from default song list."""
+    logger.info("Getting recommendations from default songs list")
+    try:
+        default_songs = df_scaled[df_scaled['song_id'].isin(fallback_user_songs)]
+        
+        # Structure as new songs and default songs
+        recommendations = {
+            'new_songs': default_songs.head(10).to_dict('records'),
+            'user_songs': default_songs.tail(5).to_dict('records')
+        }
+        
+        logger.info(f"Generated recommendations from default songs")
+        return recommendations
+        
+    except Exception as e:
+        logger.error(f"Error getting default recommendations: {e}")
         raise
 
 def get_dqn_recommendations(user_id, state, df_scaled, top_n=10):
