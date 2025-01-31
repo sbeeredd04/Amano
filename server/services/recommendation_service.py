@@ -729,8 +729,24 @@ def run_background_training(user_id, df_scaled=None, features=None, feature_weig
         logger.error(f"Error in background training: {e}", exc_info=True)
         raise
 
+def get_weighted_recommendations(df, similarity_scores, popularity_weight=0.3, n_recommendations=10):
+    """Get recommendations with weighted combination of similarity and popularity."""
+    try:
+        # Normalize similarity scores and popularity
+        similarity_norm = (similarity_scores - similarity_scores.min()) / (similarity_scores.max() - similarity_scores.min())
+        popularity_norm = (df['popularity'] - df['popularity'].min()) / (df['popularity'].max() - df['popularity'].min())
+        
+        # Combine scores with weighting
+        df['combined_score'] = (1 - popularity_weight) * similarity_norm + popularity_weight * popularity_norm
+        
+        # Sort by combined score
+        return df.nlargest(n_recommendations, 'combined_score')
+    except Exception as e:
+        print(f"Error in weighted recommendations: {str(e)}")
+        return df.nlargest(n_recommendations, 'popularity')
+
 def get_cluster_based_recommendations(user_songs, df_scaled, n_recommendations=10, features=None, exclude_songs=None):
-    """Get recommendations using clustering and similarity."""
+    """Get recommendations using clustering and similarity with popularity weighting."""
     print("\n=== Generating Cluster-Based Recommendations ===")
     
     try:
@@ -740,34 +756,19 @@ def get_cluster_based_recommendations(user_songs, df_scaled, n_recommendations=1
         if exclude_songs is None:
             exclude_songs = []
             
-        # Get user's songs features
         user_songs_df = df_scaled[df_scaled['song_id'].isin(user_songs)]
         print(f"User songs count: {len(user_songs_df)}")
         
         if len(user_songs_df) == 0:
             return get_default_recommendations(df_scaled)
             
-        # Prepare features for clustering
         X = StandardScaler().fit_transform(user_songs_df[features])
-        
-        # Perform DBSCAN clustering
         dbscan = DBSCAN(eps=0.5, min_samples=2)
         clusters = dbscan.fit_predict(X)
         
-        # Count points in each cluster
         cluster_counts = Counter(clusters)
         print(f"Found {len(cluster_counts)} clusters")
         
-        # Calculate recommendations per cluster
-        total_points = len(user_songs_df)
-        recommendations_per_cluster = {}
-        
-        for cluster_id in cluster_counts:
-            weight = cluster_counts[cluster_id] / total_points
-            recs = max(2, int(n_recommendations * weight))  # Ensure at least 2 recs per cluster
-            recommendations_per_cluster[cluster_id] = recs
-            
-        # Get recommendations for each cluster
         all_recommendations = []
         
         for cluster_id in cluster_counts:
@@ -785,20 +786,26 @@ def get_cluster_based_recommendations(user_songs, df_scaled, n_recommendations=1
             cluster_df = df_scaled.copy()
             cluster_df['similarity'] = similarity_scores
             
-            # Filter out user's songs and excluded songs
+            # Filter out excluded songs
             exclude_ids = user_songs + [s.get('song_id') for s in exclude_songs]
-            cluster_recommendations = cluster_df[~cluster_df['song_id'].isin(exclude_ids)]\
-                .nlargest(recommendations_per_cluster[cluster_id], 'similarity')
-                
-            all_recommendations.append(cluster_recommendations)
+            filtered_df = cluster_df[~cluster_df['song_id'].isin(exclude_ids)]
             
-        # Combine all recommendations
+            # Get weighted recommendations for this cluster
+            cluster_recs = get_weighted_recommendations(
+                df=filtered_df,
+                similarity_scores=similarity_scores,
+                popularity_weight=0.3,  # Adjust this weight to favor popularity more/less
+                n_recommendations=max(2, int(n_recommendations * (len(cluster_songs_df) / len(user_songs_df))))
+            )
+            
+            all_recommendations.append(cluster_recs)
+            
+        # Combine and get final recommendations
         final_recommendations = pd.concat(all_recommendations)
-        final_recommendations = final_recommendations.nlargest(n_recommendations, 'similarity')
+        final_recommendations = final_recommendations.nlargest(n_recommendations, 'combined_score')
         
-        # Get familiar recommendations
-        n_familiar = min(5, len(user_songs_df))
-        familiar_recommendations = user_songs_df.sample(n=n_familiar)
+        # Get popular songs from user's playlists
+        familiar_recommendations = user_songs_df.nlargest(5, 'popularity')
         
         print(f"\nRecommendation counts:")
         print(f"New songs: {len(final_recommendations)}")
@@ -981,16 +988,34 @@ def filter_best_recommendations(recommendations, n_keep):
     return sorted_recs[:n_keep]
 
 def get_popular_recommendations(user_id, genres, mood, limit, exclude_songs):
-    """Get popular songs matching user preferences."""
+    """Get popular songs matching user preferences with genre weighting."""
     session = get_session()
     try:
-        query = session.query(Song)\
+        # Get base query for popular songs in the given genres
+        base_query = session.query(Song)\
             .filter(Song.track_genre.in_(genres))\
-            .filter(Song.song_id.notin_([s['song_id'] for s in exclude_songs]))\
-            .order_by(Song.popularity.desc())\
-            .limit(limit)
+            .filter(Song.song_id.notin_([s['song_id'] for s in exclude_songs]))
+        
+        # Get top songs by popularity
+        popular_songs = base_query.order_by(Song.popularity.desc()).limit(limit * 2).all()
+        
+        # Convert to DataFrame for weighted selection
+        songs_df = pd.DataFrame([song.serialize() for song in popular_songs])
+        if songs_df.empty:
+            return []
             
-        return [song.serialize() for song in query.all()]
+        # Normalize popularity scores
+        songs_df['popularity_norm'] = (songs_df['popularity'] - songs_df['popularity'].min()) / \
+                                    (songs_df['popularity'].max() - songs_df['popularity'].min())
+        
+        # Add random variation to avoid always selecting the same songs
+        songs_df['random_weight'] = np.random.uniform(0.8, 1.0, len(songs_df))
+        songs_df['final_score'] = songs_df['popularity_norm'] * songs_df['random_weight']
+        
+        # Select final recommendations
+        final_recommendations = songs_df.nlargest(limit, 'final_score')
+        return final_recommendations.to_dict('records')
+        
     finally:
         session.close()
 
