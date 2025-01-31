@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Menu, MenuItem, NavSection } from "../components/ui/navbar-menu";
 import { Vortex } from "../components/ui/vortex";
+import { ExpandablePlaylist } from "../components/ui/expandable-playlist";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://70bnmmdc-5000.usw3.devtunnels.ms';
 
@@ -371,44 +372,43 @@ export default function RecommendationPage() {
   };
 
   const handleAddPlaylist = async () => {
-    const userId = sessionStorage.getItem("user_id");
-    if (!userId) {
-      setMessage("User not logged in. Please log in again.");
-      return;
-    }
-
-    if (!playlistName || selectedSongs.length === 0) {
-      alert("Please provide a playlist name and select at least one song.");
+    if (!playlistName.trim()) {
+      setMessage("Please enter a playlist name");
       return;
     }
 
     try {
-      const response = await fetch(
-        `${API_URL}/playlists/add`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: userId,
-            name: playlistName,
-            song_ids: selectedSongs,
-          }),
-        }
-      );
+      const userId = sessionStorage.getItem("user_id");
+      const endpoint = editingPlaylist ? '/playlists/edit' : '/playlists/add';
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          name: playlistName,
+          song_ids: selectedSongs,
+          ...(editingPlaylist && { playlist_id: editingPlaylist.playlist_id })
+        }),
+      });
 
-      const data = await response.json();
       if (response.ok) {
-        setMessage("Playlist added successfully.");
-        setPlaylists((prevPlaylists) => [...prevPlaylists, data.playlist]);
-        console.debug("Playlist added successfully:", data.playlist);
-        setShowSongsSection(false);
+        setMessage(editingPlaylist ? "Playlist updated successfully!" : "Playlist created successfully!");
+        // Refresh playlists
+        fetchPlaylists();
+        // Reset form
         setPlaylistName("");
         setSelectedSongs([]);
+        setEditingPlaylist(null);
       } else {
-        setMessage(data.error);
+        const data = await response.json();
+        setMessage(data.error || "Failed to save playlist");
       }
     } catch (error) {
-      console.error("Error adding playlist:", error);
+      console.error("Error saving playlist:", error);
+      setMessage("Error saving playlist");
     }
   };
 
@@ -444,48 +444,19 @@ export default function RecommendationPage() {
     }
   };
 
-  const handleEditPlaylist = async (playlist) => {
+  const handleEditPlaylist = (playlist) => {
     setEditingPlaylist(playlist);
+    // Pre-select the songs that are in the playlist
+    setSelectedSongs(playlist.songs.map(song => song.song_id));
     setPlaylistName(playlist.name);
-    setSelectedSongs([]); // You might want to fetch current songs here
-    setShowSongsSection(true);
+    // Scroll to songs section
+    document.getElementById('songs').scrollIntoView({ behavior: 'smooth' });
   };
 
-  const handleSaveEdit = async () => {
-    const userId = sessionStorage.getItem("user_id");
-    if (!userId) {
-      setMessage("User not logged in. Please log in again.");
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `${API_URL}/playlists/edit`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: userId,
-            playlist_id: editingPlaylist.playlist_id,
-            name: playlistName,
-            song_ids: selectedSongs,
-          }),
-        }
-      );
-
-      const data = await response.json();
-      if (response.ok) {
-        setPlaylists(playlists.map(p => 
-          p.playlist_id === editingPlaylist.playlist_id ? data.playlist : p
-        ));
-        setMessage("Playlist updated successfully");
-        setShowSongsSection(false);
-        setEditingPlaylist(null);
-      }
-    } catch (error) {
-      console.error("Error updating playlist:", error);
-      setMessage("Error updating playlist");
-    }
+  const handleCancelEdit = () => {
+    setEditingPlaylist(null);
+    setPlaylistName("");
+    setSelectedSongs([]);
   };
 
   const Pagination = () => {
@@ -810,6 +781,45 @@ export default function RecommendationPage() {
     }
   };
 
+  // Add this function to handle song removal
+  const handleRemoveSong = async (playlistId, songId) => {
+    try {
+      const userId = sessionStorage.getItem("user_id");
+      const response = await fetch(`${API_URL}/playlists/remove_song`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          playlist_id: playlistId,
+          song_id: songId
+        }),
+      });
+
+      if (response.ok) {
+        // Update the playlists state to reflect the change
+        setPlaylists(playlists.map(playlist => {
+          if (playlist.playlist_id === playlistId) {
+            return {
+              ...playlist,
+              songs: playlist.songs.filter(song => song.song_id !== songId)
+            };
+          }
+          return playlist;
+        }));
+        setMessage("Song removed from playlist");
+      } else {
+        const data = await response.json();
+        setMessage(data.error || "Failed to remove song");
+      }
+    } catch (error) {
+      console.error("Error removing song:", error);
+      setMessage("Error removing song from playlist");
+    }
+  };
+
   return (
     <div className="relative min-h-screen font-ubuntu-mono">
       {/* Vortex Background with custom settings */}
@@ -893,16 +903,38 @@ export default function RecommendationPage() {
 
           {/* Songs Section */}
           <section id="songs" className="min-h-screen p-6 bg-transparent">
-            <h2 className="text-4xl font-bold text-center mb-12">Discover Songs</h2>
+            <h2 className="text-4xl font-bold text-center mb-12">
+              {editingPlaylist ? `Edit Playlist: ${editingPlaylist.name}` : "Discover Songs"}
+            </h2>
             <div className="max-w-6xl mx-auto">
-              <input
-                type="text"
-                placeholder="Playlist Name"
-                value={playlistName}
-                onChange={(e) => setPlaylistName(e.target.value)}
-                className="w-full mb-4 px-4 py-2 bg-transparent border border-white/[0.2] rounded-lg"
-              />
-              
+              {/* Add/Edit playlist form */}
+              <div className="mb-8">
+                <input
+                  type="text"
+                  value={playlistName}
+                  onChange={(e) => setPlaylistName(e.target.value)}
+                  placeholder="Enter playlist name"
+                  className="bg-black/40 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-2 w-full mb-4"
+                />
+                {editingPlaylist && (
+                  <div className="flex justify-between">
+                    <button
+                      onClick={handleAddPlaylist}
+                      className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors"
+                    >
+                      Update Playlist
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                    >
+                      Cancel Edit
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Search and filter controls */}
               <div className="flex flex-wrap gap-4 items-center mb-4">
                 <GenreFilter />
                 <input
@@ -931,21 +963,21 @@ export default function RecommendationPage() {
                 </button>
               </div>
 
-              {/* Songs Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+              {/* Songs grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {songs.map((song) => (
                   <div
                     key={song.song_id}
-                    onClick={() => toggleSongSelection(song.song_id)}
-                    className={`p-4 rounded-lg cursor-pointer bg-black/80 backdrop-blur-sm ${
+                    className={`bg-black/40 backdrop-blur-sm border ${
                       selectedSongs.includes(song.song_id)
-                        ? "border-2 border-green-500 text-green-500"
-                        : "border border-white/[0.2] hover:border-white"
-                    }`}
+                        ? 'border-green-500'
+                        : 'border-white/10'
+                    } rounded-lg p-4 cursor-pointer transition-all`}
+                    onClick={() => toggleSongSelection(song.song_id)}
                   >
-                    <h3 className="font-bold">{song.track_name}</h3>
-                    <p>{song.artist_name}</p>
-                    <p className="text-sm text-gray-300">{song.track_genre}</p>
+                    <h3 className="font-semibold text-white">{song.track_name}</h3>
+                    <p className="text-sm text-gray-300">{song.artist_name}</p>
+                    <p className="text-xs text-gray-400">{song.track_genre}</p>
                   </div>
                 ))}
               </div>
@@ -953,18 +985,22 @@ export default function RecommendationPage() {
               {/* Pagination */}
               <Pagination />
 
-              {/* Existing buttons */}
+              {/* Action buttons */}
               <div className="flex justify-between mt-4">
                 <button
                   onClick={() => setSelectedSongs([])}
-                  className="px-4 py-2 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-black">
+                  className="px-4 py-2 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-black"
+                >
                   Clear Selection
                 </button>
-                <button
-                  onClick={handleAddPlaylist}
-                  className="px-4 py-2 border border-green-500 text-green-500 rounded hover:bg-green-500 hover:text-black">
-                  Add Playlist
-                </button>
+                {!editingPlaylist && (
+                  <button
+                    onClick={handleAddPlaylist}
+                    className="px-4 py-2 border border-green-500 text-green-500 rounded hover:bg-green-500 hover:text-black"
+                  >
+                    Add Playlist
+                  </button>
+                )}
               </div>
             </div>
           </section>
@@ -973,30 +1009,12 @@ export default function RecommendationPage() {
           <section id="playlists" className="min-h-screen p-6 bg-transparent">
             <h2 className="text-4xl font-bold text-center mb-12">Your Playlists</h2>
             <div className="max-w-6xl mx-auto">
-              <div className="grid gap-4">
-                {playlists.map((playlist) => (
-                  <div 
-                    key={playlist.playlist_id} 
-                    className="bg-black/40 backdrop-blur-sm border border-white/[0.2] rounded-lg p-4 flex justify-between items-center"
-                  >
-                    <span>{playlist.name}</span>
-                    <div className="space-x-2">
-                      <button 
-                        onClick={() => handleEditPlaylist(playlist)}
-                        className="px-3 py-1 border border-blue-500 text-blue-500 rounded hover:bg-blue-500 hover:text-black"
-                      >
-                        Edit
-                      </button>
-                      <button 
-                        onClick={() => handleDeletePlaylist(playlist.playlist_id)}
-                        className="px-3 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-black"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <ExpandablePlaylist
+                playlists={playlists}
+                onEdit={handleEditPlaylist}
+                onDelete={handleDeletePlaylist}
+                onRemoveSong={handleRemoveSong}
+              />
             </div>
           </section>
 

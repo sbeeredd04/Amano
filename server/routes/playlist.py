@@ -40,9 +40,25 @@ def get_playlists():
                 logger.debug(f"No playlists found for user_id: {user_id}")
                 return jsonify({"message": "No playlists found", "playlists": []}), 200
 
-            playlists_serialized = [playlist.serialize() for playlist in playlists]
-            logger.debug(f"Found {len(playlists_serialized)} playlists")
-            return jsonify({"playlists": playlists_serialized}), 200
+            playlists_with_songs = []
+            for playlist in playlists:
+                # Fetch songs for this playlist
+                songs = session.query(Song)\
+                    .join(PlaylistSong)\
+                    .filter(PlaylistSong.playlist_id == playlist.playlist_id)\
+                    .all()
+                
+                playlist_data = playlist.serialize()
+                playlist_data['songs'] = [{
+                    'song_id': song.song_id,
+                    'track_name': song.track_name,
+                    'artist_name': song.artists,
+                    'track_genre': song.track_genre
+                } for song in songs]
+                
+                playlists_with_songs.append(playlist_data)
+
+            return jsonify({"playlists": playlists_with_songs}), 200
 
         except SQLAlchemyError as e:
             logger.error(f"Database error while fetching playlists: {str(e)}")
@@ -251,7 +267,6 @@ def edit_playlist():
     user_id = data.get('user_id')
     playlist_id = data.get('playlist_id')
     name = data.get('name')
-    description = data.get('description')
     song_ids = data.get('song_ids', [])
 
     if not all([user_id, playlist_id, name]):
@@ -270,20 +285,35 @@ def edit_playlist():
 
         # Update playlist details
         playlist.name = name
-        playlist.description = description
 
-        # Update songs if provided
-        if song_ids is not None:
-            # Remove existing songs
-            session.query(PlaylistSong).filter_by(playlist_id=playlist_id).delete()
-            # Add new songs
-            for song_id in song_ids:
-                session.add(PlaylistSong(playlist_id=playlist_id, song_id=song_id))
+        # Update songs
+        # First, remove all existing songs
+        session.query(PlaylistSong).filter_by(playlist_id=playlist_id).delete()
+        
+        # Add new songs
+        for song_id in song_ids:
+            playlist_song = PlaylistSong(playlist_id=playlist_id, song_id=song_id)
+            session.add(playlist_song)
 
         session.commit()
+
+        # Fetch updated playlist with songs for response
+        updated_songs = session.query(Song)\
+            .join(PlaylistSong)\
+            .filter(PlaylistSong.playlist_id == playlist_id)\
+            .all()
+
+        response_data = playlist.serialize()
+        response_data['songs'] = [{
+            'song_id': song.song_id,
+            'track_name': song.track_name,
+            'artist_name': song.artists,
+            'track_genre': song.track_genre
+        } for song in updated_songs]
+
         return jsonify({
             "message": "Playlist updated successfully",
-            "playlist": playlist.serialize()
+            "playlist": response_data
         }), 200
 
     except Exception as e:
@@ -316,3 +346,59 @@ def get_artists():
     except Exception as e:
         logger.error(f"Error fetching artists: {e}")
         return jsonify({"error": str(e)}), 500
+
+@playlists_bp.route('/remove_song', methods=['POST'])
+def remove_song():
+    data = request.json
+    user_id = data.get('user_id')
+    playlist_id = data.get('playlist_id')
+    song_id = data.get('song_id')
+
+    if not all([user_id, playlist_id, song_id]):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    session = get_session()
+    try:
+        # Check if playlist belongs to user
+        playlist = session.query(Playlist).filter_by(
+            playlist_id=playlist_id, 
+            user_id=user_id
+        ).first()
+
+        if not playlist:
+            return jsonify({"error": "Playlist not found or unauthorized"}), 404
+
+        # Remove the song from the playlist
+        session.query(PlaylistSong).filter_by(
+            playlist_id=playlist_id,
+            song_id=song_id
+        ).delete()
+
+        session.commit()
+
+        # Fetch updated playlist with remaining songs
+        updated_songs = session.query(Song)\
+            .join(PlaylistSong)\
+            .filter(PlaylistSong.playlist_id == playlist_id)\
+            .all()
+
+        response_data = playlist.serialize()
+        response_data['songs'] = [{
+            'song_id': song.song_id,
+            'track_name': song.track_name,
+            'artist_name': song.artists,
+            'track_genre': song.track_genre
+        } for song in updated_songs]
+
+        return jsonify({
+            "message": "Song removed successfully",
+            "playlist": response_data
+        }), 200
+
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error removing song from playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        session.close()
