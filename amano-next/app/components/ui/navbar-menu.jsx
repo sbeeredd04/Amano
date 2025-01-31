@@ -17,13 +17,14 @@ export const MenuItem = ({
   setActive,
   active,
   item,
-  children
+  children,
+  className
 }) => {
   return (
     <div onMouseEnter={() => setActive(item)} className="relative">
       <motion.p
         transition={{ duration: 0.3 }}
-        className="cursor-pointer text-white hover:opacity-[0.9] text-sm font-medium">
+        className={`cursor-pointer text-white hover:opacity-[0.9] text-sm font-medium ${className}`}>
         {item}
       </motion.p>
       {active !== null && (
@@ -58,9 +59,11 @@ export const Menu = ({
   return (
     <nav
       onMouseLeave={() => setActive(null)}
-      className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 w-[25%] min-w-[400px] bg-black border border-white/[0.2] rounded-full flex justify-center space-x-6 px-8 py-4"
+      className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 w-[40%] min-w-[800px] bg-black border border-white/[0.2] rounded-full px-8 py-4"
     >
-      {children}
+      <div className="flex justify-between items-center">
+        {children}
+      </div>
     </nav>
   );
 };

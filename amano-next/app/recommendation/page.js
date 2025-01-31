@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Menu, MenuItem, NavSection } from "../components/ui/navbar-menu";
 import { Vortex } from "../components/ui/vortex";
 import { ExpandablePlaylist } from "../components/ui/expandable-playlist";
+import { useRouter } from "next/navigation";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://70bnmmdc-5000.usw3.devtunnels.ms';
 
@@ -129,6 +130,7 @@ const PlaylistModal = ({ isOpen, onClose, onSubmit, playlists, onCreateNew }) =>
 };
 
 export default function RecommendationPage() {
+  const router = useRouter();
   const [playlists, setPlaylists] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
   const [mood, setMood] = useState("");
@@ -160,14 +162,19 @@ export default function RecommendationPage() {
   const [selectedSong, setSelectedSong] = useState(null);
   const [activeSection, setActiveSection] = useState(null);
   const [activeItem, setActiveItem] = useState(null);
+  const [userName, setUserName] = useState("");
 
   useEffect(() => {
     const userId = sessionStorage.getItem("user_id");
+    const name = sessionStorage.getItem("user_name");
+    
     if (!userId) {
       console.error("User ID not found in session. Redirecting to login.");
-      window.location.href = "/";
+      router.push("/");
       return;
     }
+
+    setUserName(name || "User");
 
     const fetchPlaylists = async () => {
       try {
@@ -258,7 +265,7 @@ export default function RecommendationPage() {
     fetchPlaylists();
     fetchMood();
     fetchInitialData();
-  }, [userId, useUserSongs]); // Add userId and useUserSongs as dependencies
+  }, [router]);
 
   const handleGenerateRecommendations = async () => {
     const userId = sessionStorage.getItem("user_id");
@@ -820,9 +827,15 @@ export default function RecommendationPage() {
     }
   };
 
+  const handleLogout = () => {
+    // Clear session storage
+    sessionStorage.clear();
+    // Redirect to home page
+    router.push("/");
+  };
+
   return (
     <div className="relative min-h-screen font-ubuntu-mono">
-      {/* Vortex Background with custom settings */}
       <Vortex
         particleCount={800}           // More particles for denser effect
         rangeY={250}                   // Larger vertical movement
@@ -835,63 +848,93 @@ export default function RecommendationPage() {
         containerClassName="fixed inset-0 w-full h-full"  // Fill entire viewport
       />
 
-      {/* Main content with higher z-index */}
       <div className="relative z-10">
         <div className="relative z-50">
           <Menu setActive={setActiveItem}>
-            <MenuItem 
-              setActive={setActiveItem}
-              active={activeItem}
-              item="Home"
-            >
-              <NavSection
-                title="Home"
-                description="Return to the main dashboard"
-                href="#home"
-              />
-            </MenuItem>
+            <div className="flex items-center space-x-6">
+              <MenuItem 
+                setActive={setActiveItem}
+                active={activeItem}
+                item="Home"
+              >
+                <NavSection
+                  title="Home"
+                  description="Return to the main dashboard"
+                  href="#home"
+                />
+              </MenuItem>
 
-            <MenuItem
-              setActive={setActiveItem}
-              active={activeItem}
-              item="Songs"
-            >
-              <NavSection
-                title="Songs"
-                description="Browse and manage your music collection"
-                href="#songs"
-              />
-            </MenuItem>
+              <MenuItem
+                setActive={setActiveItem}
+                active={activeItem}
+                item="Songs"
+              >
+                <NavSection
+                  title="Songs"
+                  description="Browse and manage your music collection"
+                  href="#songs"
+                />
+              </MenuItem>
 
-            <MenuItem
-              setActive={setActiveItem}
-              active={activeItem}
-              item="Playlists"
-            >
-              <NavSection
-                title="Playlists"
-                description="Manage your custom playlists"
-                href="#playlists"
-              />
-            </MenuItem>
+              <MenuItem
+                setActive={setActiveItem}
+                active={activeItem}
+                item="Playlists"
+              >
+                <NavSection
+                  title="Playlists"
+                  description="Manage your custom playlists"
+                  href="#playlists"
+                />
+              </MenuItem>
 
-            <MenuItem
-              setActive={setActiveItem}
-              active={activeItem}
-              item="Recommendations"
-            >
-              <NavSection
-                title="Recommendations"
-                description="Get personalized music suggestions"
-                href="#recommendations"
-              />
-            </MenuItem>
+              <MenuItem
+                setActive={setActiveItem}
+                active={activeItem}
+                item="Recommendations"
+              >
+                <NavSection
+                  title="Recommendations"
+                  description="Get personalized music suggestions"
+                  href="#recommendations"
+                />
+              </MenuItem>
+            </div>
+
+            <div className="flex-grow" />
+
+            <div className="flex items-center space-x-6">
+              <MenuItem
+                setActive={setActiveItem}
+                active={activeItem}
+                item={`Hi, ${userName}`}
+              >
+                <NavSection
+                  title="Profile"
+                  description="View your profile settings"
+                  href="#profile"
+                />
+              </MenuItem>
+
+              <MenuItem
+                setActive={setActiveItem}
+                active={activeItem}
+                item="Logout"
+                className="border border-red-500 bg-red-500/40 hover:bg-red-500/60 rounded-full px-4 py-1 transition-colors"
+              >
+                <div 
+                  onClick={handleLogout}
+                  className="cursor-pointer px-4 py-2"
+                >
+                  <h4 className="text-red-500 font-bold mb-1">Logout</h4>
+                  <p className="text-red-300 text-sm">Sign out of your account</p>
+                </div>
+              </MenuItem>
+            </div>
           </Menu>
         </div>
 
-        {/* Add padding-top to account for fixed navbar */}
         <div className="pt-16">
-          {/* Home Section */}
           <section id="home" className="min-h-screen p-6 flex items-center justify-center bg-transparent">
             <div className="text-center">
               <h1 className="text-9xl font-bold tracking-wider mb-4">
@@ -901,13 +944,11 @@ export default function RecommendationPage() {
             </div>
           </section>
 
-          {/* Songs Section */}
           <section id="songs" className="min-h-screen p-6 bg-transparent">
             <h2 className="text-4xl font-bold text-center mb-12">
               {editingPlaylist ? `Edit Playlist: ${editingPlaylist.name}` : "Discover Songs"}
             </h2>
             <div className="max-w-6xl mx-auto">
-              {/* Add/Edit playlist form */}
               <div className="mb-8">
                 <input
                   type="text"
@@ -934,7 +975,6 @@ export default function RecommendationPage() {
                 )}
               </div>
 
-              {/* Search and filter controls */}
               <div className="flex flex-wrap gap-4 items-center mb-4">
                 <GenreFilter />
                 <input
@@ -963,7 +1003,6 @@ export default function RecommendationPage() {
                 </button>
               </div>
 
-              {/* Songs grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {songs.map((song) => (
                   <div
@@ -982,10 +1021,8 @@ export default function RecommendationPage() {
                 ))}
               </div>
 
-              {/* Pagination */}
               <Pagination />
 
-              {/* Action buttons */}
               <div className="flex justify-between mt-4">
                 <button
                   onClick={() => setSelectedSongs([])}
@@ -1005,7 +1042,6 @@ export default function RecommendationPage() {
             </div>
           </section>
 
-          {/* Playlists Section */}
           <section id="playlists" className="min-h-screen p-6 bg-transparent">
             <h2 className="text-4xl font-bold text-center mb-12">Your Playlists</h2>
             <div className="max-w-6xl mx-auto">
@@ -1018,13 +1054,10 @@ export default function RecommendationPage() {
             </div>
           </section>
 
-          {/* Recommendations Section */}
           <section id="recommendations" className="min-h-screen p-6 bg-transparent">
             <h2 className="text-4xl font-bold text-center mb-12">Your Recommendations</h2>
             
-            {/* Mood and Source Selection */}
             <div className="max-w-6xl mx-auto mb-8 flex justify-center gap-4">
-              {/* Mood Selector */}
               <div className="flex items-center space-x-4">
                 <label className="text-sm font-medium">Current Mood:</label>
                 <select
@@ -1040,14 +1073,12 @@ export default function RecommendationPage() {
                 </select>
               </div>
 
-              {/* Source Toggle */}
               <RecommendationSourceToggle 
                 useUserSongs={useUserSongs} 
                 setUseUserSongs={setUseUserSongs} 
               />
             </div>
 
-            {/* Generate Button */}
             <div className="flex justify-center mb-8">
               <button
                 onClick={handleGenerateRecommendations}
@@ -1057,7 +1088,6 @@ export default function RecommendationPage() {
               </button>
             </div>
 
-            {/* Recommendations Grid */}
             <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {recommendations.map((song) => (
                 <SongCard
@@ -1077,7 +1107,6 @@ export default function RecommendationPage() {
         </div>
       </div>
 
-      {/* Playlist Modal */}
       <PlaylistModal
         isOpen={isPlaylistModalOpen}
         onClose={() => {
