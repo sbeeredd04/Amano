@@ -71,12 +71,12 @@ class UserHistory(Base):
 class UserMood(Base):
     __tablename__ = 'user_mood'
     
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, primary_key=True)
-    mood = Column(String(20))  # Stores the mood as a string (e.g., 'Happy', 'Sad', etc.)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, nullable=False)
+    mood = Column(String, nullable=False)
 
     def __repr__(self):
-        return f"<UserMood(user_id={self.user_id}, mood={self.mood})>"
+        return f"<UserMood(user_id='{self.user_id}', mood='{self.mood}')>"
 
     def serialize(self):
         return {

@@ -14,17 +14,12 @@ logger = logging.getLogger(__name__)
 def create_app():
     app = Flask(__name__)
 
-    # Update CORS configuration to support credentials
+    # Configure CORS globally for the app
     CORS(app, 
-         resources={r"/*": {
-             "origins": [
-                 "http://localhost:3000",
-                 "https://70bnmmdc-5000.usw3.devtunnels.ms"
-             ],
-             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Authorization"],
-             "supports_credentials": True
-         }})
+         origins=["http://localhost:3000"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+         allow_headers=["Content-Type", "Authorization"],
+         supports_credentials=True)
     
     logger.debug("CORS configuration applied")
 

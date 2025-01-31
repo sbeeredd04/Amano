@@ -76,14 +76,20 @@ def get_user_playlist_from_db(user_id, df_scaled):
 
 # Update User Feedback
 def update_user_feedback(user_id, feedback):
-    logging.debug(f"Updating feedback for user {user_id}...")
-
+    """Update user feedback and track changes."""
+    logger.info(f"=== Updating Feedback for User {user_id} ===")
+    
     session = get_session()
     try:
         for item in feedback:
             song_id = item['song_id']
             reward = item['reward']
             mood = item['mood']
+            
+            logger.info(f"Processing feedback item:")
+            logger.info(f"- Song ID: {song_id}")
+            logger.info(f"- Reward: {reward}")
+            logger.info(f"- Mood: {mood}")
 
             # Update or create user history
             history = session.query(UserHistory).filter_by(
@@ -92,9 +98,11 @@ def update_user_feedback(user_id, feedback):
             ).first()
 
             if history:
+                logger.info(f"Updating existing feedback - Old reward: {history.reward}, New reward: {reward}")
                 history.reward = reward
                 history.mood = mood
             else:
+                logger.info("Creating new feedback entry")
                 new_history = UserHistory(
                     user_id=user_id,
                     song_id=song_id,
@@ -104,15 +112,11 @@ def update_user_feedback(user_id, feedback):
                 session.add(new_history)
 
         session.commit()
-
-        # Check if we should trigger training
-        history_count = session.query(UserHistory).filter_by(user_id=user_id).count()
-        if history_count >= 5:
-            run_background_training(user_id)
+        logger.info("Feedback update committed successfully")
 
     except Exception as e:
         session.rollback()
-        logging.error(f"Error updating user feedback: {e}")
+        logger.error(f"Error updating user feedback: {e}", exc_info=True)
         raise
     finally:
         session.close()
@@ -205,8 +209,6 @@ def fetch_user_history_and_recommend(user_id, mood=None, use_user_songs=True, df
     except Exception as e:
         logger.error(f"Error in fetch_user_history_and_recommend: {e}", exc_info=True)
         raise
-    finally:
-        session.close()
 
 def process_user_history(history, mood=None):
     """Process user history to generate recommendations."""
@@ -231,49 +233,81 @@ def process_user_history(history, mood=None):
 
 # Background Training Function
 def background_train_dqn(user_id, df_scaled, features, feature_weights):
-    logging.debug(f"Starting background training for user {user_id}...")
-
-    user_songs, _ = get_user_playlist_from_db(user_id, df_scaled)
-    recommended_songs_df = recommend_songs_filtered(user_songs, df_scaled, features, feature_weights, top_n=200)
-    action_size = len(recommended_songs_df)
-
-    policy_net, target_net, optimizer, memory = init_dqn_model(1, action_size)  # State size is now 1 (integer state)
-
-    eps_start = 1.0
-    eps_end = 0.1
-    eps_decay = 0.995
-    batch_size = 32
-    gamma = 0.99
-    target_update = 10
-    eps_threshold = eps_start
-    num_episodes = 10
-
-    user_mood = get_user_mood(user_id)
-    state = convert_mood_to_state(user_mood)  # Integer state
-
-    for episode in range(num_episodes):
-        for t in range(10):
-            action = select_action([state], eps_threshold, action_size, policy_net)
-            next_state, reward = get_next_state_and_reward(action, recommended_songs_df)
-
-            memory.append(([state], action, reward, [next_state]))
-            optimize_model(policy_net, target_net, memory, optimizer, batch_size, gamma)
-
-            state = next_state
-
-        eps_threshold = max(eps_end, eps_threshold * eps_decay)
-
-        if episode % target_update == 0:
-            target_net.load_state_dict(policy_net.state_dict())
-
-    logging.debug(f"Background training completed for user {user_id}.")
-
-# Function to run training in the background
-def run_background_training(user_id, df_scaled, features, feature_weights):
-    logging.debug(f"Running background training for user {user_id} in a separate thread...")
+    """Train DQN model with detailed logging."""
+    logger.info(f"=== Starting DQN Training for User {user_id} ===")
     
-    training_thread = threading.Thread(target=background_train_dqn, args=(user_id, df_scaled, features, feature_weights))
-    training_thread.start()
+    try:
+        user_songs, count = get_user_playlist_from_db(user_id, df_scaled)
+        logger.info(f"Retrieved {count} songs from user's playlist")
+        
+        recommended_songs_df = recommend_songs_filtered(user_songs, df_scaled, features, feature_weights, top_n=200)
+        action_size = len(recommended_songs_df)
+        logger.info(f"Action space size: {action_size}")
+
+        # Initialize DQN components
+        policy_net, target_net, optimizer, memory = init_dqn_model(1, action_size)
+        logger.info("DQN model initialized")
+
+        # Training parameters
+        eps_start = 1.0
+        eps_end = 0.1
+        eps_decay = 0.995
+        batch_size = 32
+        gamma = 0.99
+        target_update = 10
+        eps_threshold = eps_start
+        num_episodes = 10
+
+        # Get initial state
+        user_mood = get_user_mood(user_id)
+        state = convert_mood_to_state(user_mood)
+        logger.info(f"Initial state (mood): {user_mood} -> {state}")
+
+        # Training loop
+        total_reward = 0
+        for episode in range(num_episodes):
+            episode_reward = 0
+            logger.info(f"\nStarting Episode {episode + 1}/{num_episodes}")
+            logger.info(f"Epsilon: {eps_threshold:.4f}")
+
+            for t in range(10):
+                # Select and perform action
+                action = select_action([state], eps_threshold, action_size, policy_net)
+                next_state, reward = get_next_state_and_reward(action, recommended_songs_df)
+                episode_reward += reward
+
+                logger.debug(f"Step {t + 1}: Action={action}, Reward={reward}")
+
+                # Store transition and optimize
+                memory.append(([state], action, reward, [next_state]))
+                optimize_model(policy_net, target_net, memory, optimizer, batch_size, gamma)
+
+                state = next_state
+
+            total_reward += episode_reward
+            avg_reward = episode_reward / 10
+            logger.info(f"Episode {episode + 1} complete:")
+            logger.info(f"- Average Reward: {avg_reward:.4f}")
+            logger.info(f"- Total Reward: {episode_reward}")
+
+            # Update epsilon and target network
+            eps_threshold = max(eps_end, eps_threshold * eps_decay)
+            if episode % target_update == 0:
+                target_net.load_state_dict(policy_net.state_dict())
+                logger.info("Target network updated")
+
+        # Save model and log final metrics
+        torch.save(policy_net.state_dict(), f"models/dqn_{user_id}.pth")
+        logger.info("\n=== Training Complete ===")
+        logger.info(f"Final Metrics:")
+        logger.info(f"- Total Reward: {total_reward}")
+        logger.info(f"- Average Reward per Episode: {total_reward/num_episodes:.4f}")
+        logger.info(f"- Final Epsilon: {eps_threshold:.4f}")
+        logger.info(f"Model saved to models/dqn_{user_id}.pth")
+
+    except Exception as e:
+        logger.error(f"Error in DQN training: {e}", exc_info=True)
+        raise
 
 # DQN Model Optimization Function
 def optimize_model(policy_net, target_net, memory, optimizer, batch_size, gamma):
@@ -308,32 +342,47 @@ def select_action(state, eps_threshold, action_size, policy_net):
 
 # Function to update user mood in the database
 def update_user_mood(user_id, mood):
-    logging.debug(f"Updating mood for user {user_id}...")
+    """Update user's current mood."""
+    logger.info(f"=== Updating Mood for User {user_id} to {mood} ===")
     
     session = get_session()
-    with session:
+    try:
+        # Find existing mood entry
         existing_mood = session.query(UserMood).filter_by(user_id=user_id).first()
-
+        
         if existing_mood:
+            logger.info(f"Updating existing mood from {existing_mood.mood} to {mood}")
             existing_mood.mood = mood
         else:
+            logger.info(f"Creating new mood entry for user")
             new_mood = UserMood(user_id=user_id, mood=mood)
             session.add(new_mood)
         
         session.commit()
-
-    logging.debug(f"Mood update complete for user {user_id}")
+        logger.info("Mood update successful")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error updating mood: {e}", exc_info=True)
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 # Function to get user mood from the database
 def get_user_mood(user_id):
     """Get user's current mood."""
+    logger.info(f"=== Fetching Mood for User {user_id} ===")
+    
     session = get_session()
     try:
         user_mood = session.query(UserMood).filter_by(user_id=user_id).first()
-        return user_mood.mood if user_mood else "Calm"  # Default mood
+        mood = user_mood.mood if user_mood else "Calm"
+        logger.info(f"Current mood: {mood}")
+        return mood
     except Exception as e:
-        logger.error(f"Error getting user mood: {e}")
-        return "Calm"  # Return default mood on error
+        logger.error(f"Error getting user mood: {e}", exc_info=True)
+        return "Calm"  # Default mood
     finally:
         session.close()
 
@@ -468,4 +517,50 @@ def load_and_get_dataset():
         
     except Exception as e:
         logger.error(f"Error loading dataset: {e}")
+        raise
+
+def run_background_training(user_id, df_scaled=None, features=None, feature_weights=None):
+    """
+    Run background DQN training for a user based on their feedback history.
+    """
+    logger.info(f"=== Starting Background Training for User {user_id} ===")
+    
+    try:
+        if df_scaled is None:
+            logger.info("Loading dataset as it wasn't provided")
+            df_scaled = load_and_get_dataset()
+            
+        if features is None:
+            features = ['energy', 'acousticness', 'valence', 'tempo', 'speechiness', 'instrumentalness']
+            logger.info(f"Using default features: {features}")
+            
+        if feature_weights is None:
+            feature_weights = {
+                'energy': 1.0,
+                'acousticness': 5.0,
+                'valence': 5.0,
+                'tempo': 5.0,
+                'instrumentalness': 5.0,
+                'speechiness': 5.0
+            }
+            logger.info("Using default feature weights")
+
+        # Get user's current mood
+        user_mood = get_user_mood(user_id)
+        logger.info(f"Current user mood: {user_mood}")
+
+        # Train the DQN model
+        logger.info("Starting DQN training")
+        background_train_dqn(
+            user_id=user_id,
+            df_scaled=df_scaled,
+            features=features,
+            feature_weights=feature_weights
+        )
+        
+        logger.info("Background training completed successfully")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error in background training: {e}", exc_info=True)
         raise

@@ -3,12 +3,20 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy.exc import SQLAlchemyError
 from models.song_model import Song, Playlist, PlaylistSong
 from utils.db import get_session
+from flask_cors import CORS
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 playlists_bp = Blueprint('playlists', __name__)
+
+# Configure CORS for the blueprint
+CORS(playlists_bp, 
+     origins=["http://localhost:3000"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization"],
+     supports_credentials=True)
 
 # Fetch all playlists for a user
 @playlists_bp.route('/get', methods=['GET', 'POST'])
@@ -92,86 +100,52 @@ def get_all_songs():
         search = request.args.get('search', '').strip()
         search_type = request.args.get('search_type', 'track')
         
-        logger.debug(f"Received query parameters: genre='{genre}', search='{search}', search_type='{search_type}'")
-        
         try:
-            limit = int(request.args.get('limit', 20))
+            limit = int(request.args.get('limit', 12))  # Changed default to 12
             offset = int(request.args.get('offset', 0))
-            logger.debug(f"Pagination parameters: limit={limit}, offset={offset}")
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Invalid pagination parameters: {e}")
-            limit = 20
+        except (ValueError, TypeError):
+            limit = 12
             offset = 0
 
-        # Build the base query with all necessary columns
-        query = session.query(
-            Song.song_id,
-            Song.track_id,
-            Song.track_name,
-            Song.artists,
-            Song.album_name,
-            Song.track_genre,
-            Song.popularity
-        )
+        # Build query
+        query = session.query(Song)
 
-        # Apply filters with logging
+        # Apply filters
         if genre and genre.lower() != 'all':
-            logger.debug(f"Applying genre filter: {genre}")
             query = query.filter(Song.track_genre.ilike(f"%{genre}%"))
 
         if search:
-            logger.debug(f"Applying search filter: {search} (type: {search_type})")
             if search_type == 'artist':
                 query = query.filter(Song.artists.ilike(f"%{search}%"))
             else:
                 query = query.filter(Song.track_name.ilike(f"%{search}%"))
 
-        # Get total count
+        # Get total count before pagination
         total_count = query.count()
-        logger.debug(f"Total matching songs before pagination: {total_count}")
 
-        # Apply sorting and pagination
+        # Apply pagination
         songs = query.order_by(Song.popularity.desc()).offset(offset).limit(limit).all()
-        logger.debug(f"Retrieved {len(songs)} songs after pagination")
 
-        # Detailed song serialization with error handling
-        serialized_songs = []
-        for song in songs:
-            try:
-                serialized_song = {
-                    'song_id': song.song_id,
-                    'track_id': song.track_id,
-                    'track_name': song.track_name,
-                    'artists': song.artists,
-                    'album_name': song.album_name,
-                    'track_genre': song.track_genre,
-                    'popularity': song.popularity
-                }
-                serialized_songs.append(serialized_song)
-            except AttributeError as e:
-                logger.error(f"Error serializing song {song.song_id}: {e}")
-                continue
+        # Serialize results
+        serialized_songs = [{
+            'song_id': song.song_id,
+            'track_id': song.track_id,
+            'track_name': song.track_name,
+            'artist_name': song.artists,
+            'album_name': song.album_name,
+            'track_genre': song.track_genre,
+            'popularity': song.popularity
+        } for song in songs]
 
-        logger.debug(f"Successfully serialized {len(serialized_songs)} songs")
         return jsonify({
             "songs": serialized_songs,
             "total_count": total_count
         }), 200
 
-    except SQLAlchemyError as e:
-        logger.error(f"Database error in get_all_songs: {str(e)}")
-        return jsonify({
-            "error": "Database error",
-            "details": str(e),
-            "songs": [],
-            "total_count": 0
-        }), 500
-
     except Exception as e:
-        logger.error(f"Unexpected error in get_all_songs: {str(e)}")
+        logger.error(f"Error in get_all_songs: {e}")
         return jsonify({
-            "error": "Internal server error",
-            "details": str(e),
+            "error": str(e),
             "songs": [],
             "total_count": 0
         }), 500
@@ -325,14 +299,12 @@ def edit_playlist():
 def get_genres():
     session = get_session()
     try:
-        # Get unique genres
-        genres = [g[0] for g in session.query(Song.track_genre.distinct()).all()]
+        # Get unique genres and add 'All' option
+        genres = ['All'] + [g[0] for g in session.query(Song.track_genre.distinct()).all()]
         return jsonify({"genres": genres}), 200
     except Exception as e:
         logger.error(f"Error fetching genres: {e}")
         return jsonify({"error": str(e)}), 500
-    finally:
-        session.close()
 
 @playlists_bp.route('/artists', methods=['GET'])
 def get_artists():
@@ -344,5 +316,3 @@ def get_artists():
     except Exception as e:
         logger.error(f"Error fetching artists: {e}")
         return jsonify({"error": str(e)}), 500
-    finally:
-        session.close()

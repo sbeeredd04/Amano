@@ -13,20 +13,18 @@ import os
 from utils.db import get_session
 from models.song_model import UserMood, UserHistory
 import logging
-from flask_cors import CORS, cross_origin
+from flask_cors import CORS
 
 logger = logging.getLogger(__name__)
 
 recommendation_bp = Blueprint('recommendation', __name__)
+
+# Configure CORS for the blueprint
 CORS(recommendation_bp, 
-     resources={
-         r"/*": {
-             "origins": ["http://localhost:3000"],
-             "methods": ["GET", "POST", "OPTIONS"],
-             "allow_headers": ["Content-Type"],
-             "supports_credentials": True
-         }
-     })
+     origins=["http://localhost:3000"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization"],
+     supports_credentials=True)
 
 # Load the preprocessed dataset
 try:
@@ -48,7 +46,6 @@ feature_weights = {
 }
 
 @recommendation_bp.route('/initial', methods=['GET'])
-@cross_origin(supports_credentials=True)
 def get_initial_recommendations_route():
     """
     Endpoint to get initial recommendations based on user's playlist history or default songs.
@@ -81,7 +78,6 @@ def get_initial_recommendations_route():
         return jsonify({"error": str(e)}), 500
 
 @recommendation_bp.route('/refresh', methods=['POST'])
-@cross_origin(supports_credentials=True)
 def refresh_recommendations():
     """
     Endpoint to refresh recommendations based on user feedback and mood.
@@ -134,19 +130,28 @@ def handle_feedback():
     """
     Endpoint to handle user feedback (likes/dislikes) for songs.
     """
+    logger.info("=== Processing User Feedback ===")
     data = request.json
     user_id = data.get('user_id')
     song_id = data.get('song_id')
     is_liked = data.get('is_liked')
     current_mood = data.get('mood')
 
+    logger.info(f"Feedback Details:")
+    logger.info(f"- User ID: {user_id}")
+    logger.info(f"- Song ID: {song_id}")
+    logger.info(f"- Liked: {is_liked}")
+    logger.info(f"- Current Mood: {current_mood}")
+
     if not all([user_id, song_id, is_liked is not None]):
+        logger.error("Missing required fields in feedback request")
         return jsonify({"error": "Missing required fields"}), 400
 
     try:
         session = get_session()
         # Convert like/dislike to reward value
         reward = 1 if is_liked else -1
+        logger.info(f"Converted feedback to reward value: {reward}")
         
         # Update user history with feedback
         feedback = [{
@@ -156,28 +161,44 @@ def handle_feedback():
         }]
         update_user_feedback(user_id, feedback)
 
-        # Trigger background training if enough feedback is collected
+        # Get current feedback count
         history_count = session.query(UserHistory).filter_by(user_id=user_id).count()
-        if history_count >= 5:  # Threshold for training
-            run_background_training(user_id)
+        logger.info(f"User now has {history_count} feedback entries")
 
-        return jsonify({"message": "Feedback recorded successfully"}), 200
+        # Trigger background training if enough feedback is collected
+        if history_count >= 5:  # Threshold for training
+            logger.info("Feedback threshold reached - initiating DQN training")
+            run_background_training(
+                user_id=user_id,
+                df_scaled=df_scaled,
+                features=features,
+                feature_weights=feature_weights
+            )
+            logger.info("DQN training completed")
+            return jsonify({
+                "message": "Feedback recorded successfully and model trained",
+                "training_triggered": True,
+                "feedback_count": history_count
+            }), 200
+        else:
+            logger.info(f"Need {5 - history_count} more feedback entries before training")
+            return jsonify({
+                "message": "Feedback recorded successfully",
+                "training_triggered": False,
+                "feedback_count": history_count
+            }), 200
 
     except Exception as e:
-        logging.error(f"Error recording feedback: {e}")
+        logger.error(f"Error recording feedback: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
     finally:
         session.close()
 
 @recommendation_bp.route('/mood', methods=['GET', 'POST'])
-@cross_origin(supports_credentials=True)
 def manage_mood():
-    """
-    Endpoint to get or update user's current mood.
-    """
-    logger.debug(f"Received {request.method} request to /mood endpoint")
-    logger.debug(f"Request headers: {dict(request.headers)}")
-    logger.debug(f"Request args: {dict(request.args)}")
+    """Endpoint to get or update user's current mood."""
+    logger.info(f"=== Mood Management Endpoint ===")
+    logger.info(f"Method: {request.method}")
     
     try:
         user_id = request.args.get('user_id') if request.method == 'GET' else request.json.get('user_id')
@@ -187,21 +208,24 @@ def manage_mood():
             return jsonify({"error": "user_id is required"}), 400
             
         if request.method == 'GET':
-            logger.debug(f"Getting mood for user {user_id}")
+            logger.info(f"Getting mood for user {user_id}")
             mood = get_user_mood(user_id)
-            logger.debug(f"Retrieved mood: {mood}")
             return jsonify({"mood": mood})
         else:
             mood = request.json.get('mood')
             if not mood:
                 logger.error("No mood provided in POST request")
-                return jsonify({"error": "Mood is required"}), 400
+                return jsonify({"error": "mood is required"}), 400
                 
-            logger.debug(f"Updating mood for user {user_id} to {mood}")
-            update_user_mood(user_id, mood)
-            return jsonify({"message": "Mood updated successfully"})
+            logger.info(f"Updating mood for user {user_id} to {mood}")
+            try:
+                update_user_mood(user_id, mood)
+                return jsonify({"message": "Mood updated successfully", "mood": mood})
+            except Exception as e:
+                logger.error(f"Failed to update mood: {str(e)}")
+                return jsonify({"error": str(e)}), 500
             
     except Exception as e:
-        logger.error(f"Error managing mood: {e}")
+        logger.error(f"Error managing mood: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 

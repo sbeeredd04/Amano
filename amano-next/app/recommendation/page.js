@@ -1,41 +1,51 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Menu, MenuItem, NavSection } from "../components/ui/navbar-menu";
+import { Vortex } from "../components/ui/vortex";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://70bnmmdc-5000.usw3.devtunnels.ms';
 
-const SongCard = ({ song, isSelected, onToggle }) => {
-  return (
-    <div 
-      className={`p-4 rounded-lg ${
-        isSelected 
-          ? 'bg-blue-600 hover:bg-blue-500' 
-          : 'bg-gray-800 hover:bg-gray-700'
-      } cursor-pointer transition-colors`}
-      onClick={onToggle}
+const SongCard = ({ song, onLike, onDislike, feedbackStatus, onAddToPlaylist }) => (
+  <div className="bg-gray-800 p-4 rounded-lg shadow-lg relative">
+    {/* Add to Playlist Button */}
+    <button
+      onClick={() => onAddToPlaylist(song)}
+      className="absolute top-2 right-2 bg-green-500 hover:bg-green-600 text-white rounded-full w-8 h-8 flex items-center justify-center transition-colors"
+      title="Add to Playlist"
     >
-      <div className="flex flex-col h-full">
-        <h3 className="text-lg font-semibold mb-2 truncate" title={song.track_name}>
-          {song.track_name}
-        </h3>
-        <p className="text-gray-300 mb-1 truncate" title={song.artists}>
-          {song.artists}
-        </p>
-        <p className="text-gray-400 text-sm mb-2 truncate" title={song.album_name}>
-          {song.album_name}
-        </p>
-        <div className="flex justify-between items-center mt-auto">
-          <span className="px-2 py-1 bg-gray-700 rounded text-xs">
-            {song.track_genre}
-          </span>
-          <span className="text-xs text-gray-400">
-            Popularity: {song.popularity}
-          </span>
-        </div>
-      </div>
+      <span className="text-xl">+</span>
+    </button>
+
+    <h3 className="text-lg font-semibold mb-2">{song.track_name}</h3>
+    <p className="text-gray-400 mb-2">{song.artist_name}</p>
+    <p className="text-gray-500 mb-4">{song.album_name}</p>
+    
+    {/* Existing feedback buttons */}
+    <div className="flex justify-between mt-4">
+      <button
+        onClick={onLike}
+        className={`px-4 py-2 rounded ${
+          feedbackStatus[song.song_id] === 'liked'
+            ? 'bg-green-600'
+            : 'bg-gray-600 hover:bg-green-500'
+        }`}
+      >
+        👍
+      </button>
+      <button
+        onClick={onDislike}
+        className={`px-4 py-2 rounded ${
+          feedbackStatus[song.song_id] === 'disliked'
+            ? 'bg-red-600'
+            : 'bg-gray-600 hover:bg-red-500'
+        }`}
+      >
+        👎
+      </button>
     </div>
-  );
-};
+  </div>
+);
 
 const RecommendationSourceToggle = ({ useUserSongs, setUseUserSongs }) => (
   <div className="flex items-center space-x-2 mb-4">
@@ -50,6 +60,72 @@ const RecommendationSourceToggle = ({ useUserSongs, setUseUserSongs }) => (
     </select>
   </div>
 );
+
+const PlaylistModal = ({ isOpen, onClose, onSubmit, playlists, onCreateNew }) => {
+  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [selectedPlaylist, setSelectedPlaylist] = useState('');
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-gray-800 p-6 rounded-lg w-96">
+        <h2 className="text-xl font-bold mb-4">Add to Playlist</h2>
+        
+        {playlists.length > 0 && (
+          <>
+            <select
+              value={selectedPlaylist}
+              onChange={(e) => setSelectedPlaylist(e.target.value)}
+              className="w-full mb-4 p-2 bg-gray-700 rounded"
+            >
+              <option value="">Select a playlist</option>
+              {playlists.map((playlist) => (
+                <option key={playlist.playlist_id} value={playlist.playlist_id}>
+                  {playlist.name}
+                </option>
+              ))}
+            </select>
+            <div className="mb-4">
+              <div className="border-t border-gray-600 my-4"></div>
+              <p className="text-gray-400">Or create a new playlist</p>
+            </div>
+          </>
+        )}
+
+        <input
+          type="text"
+          placeholder="New playlist name"
+          value={newPlaylistName}
+          onChange={(e) => setNewPlaylistName(e.target.value)}
+          className="w-full mb-4 p-2 bg-gray-700 rounded"
+        />
+
+        <div className="flex justify-end space-x-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-600 rounded hover:bg-gray-500"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              if (selectedPlaylist) {
+                onSubmit(selectedPlaylist);
+              } else if (newPlaylistName) {
+                onCreateNew(newPlaylistName);
+              }
+            }}
+            className="px-4 py-2 bg-green-600 rounded hover:bg-green-500"
+            disabled={!selectedPlaylist && !newPlaylistName}
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default function RecommendationPage() {
   const [playlists, setPlaylists] = useState([]);
@@ -67,7 +143,8 @@ export default function RecommendationPage() {
   const [totalSongs, setTotalSongs] = useState(0);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(12); // Number of songs per page
+  const [totalPages, setTotalPages] = useState(1);
+  const songsPerPage = 12;
   const [editingPlaylist, setEditingPlaylist] = useState(null);
   const [searchType, setSearchType] = useState('track'); // 'track' or 'artist'
   const [genres, setGenres] = useState([]);
@@ -75,8 +152,13 @@ export default function RecommendationPage() {
   const [currentMood, setCurrentMood] = useState("Calm");
   const moods = ["Angry", "Content", "Happy", "Delighted", "Calm", "Sleepy", "Sad", "Depressed", "Excited"];
   const [useUserSongs, setUseUserSongs] = useState(true);
+  const [pendingFeedback, setPendingFeedback] = useState([]);
   const [feedbackStatus, setFeedbackStatus] = useState({});
   const [userId, setUserId] = useState(1); // Add default userId state or get from auth
+  const [isPlaylistModalOpen, setIsPlaylistModalOpen] = useState(false);
+  const [selectedSong, setSelectedSong] = useState(null);
+  const [activeSection, setActiveSection] = useState(null);
+  const [activeItem, setActiveItem] = useState(null);
 
   useEffect(() => {
     const userId = sessionStorage.getItem("user_id");
@@ -255,47 +337,28 @@ export default function RecommendationPage() {
     }
   };
 
-  const fetchSongs = async (page = 1) => {
-    setLoading(true);
-    setMessage("");
-    
+  const fetchSongs = async (page = currentPage) => {
     try {
-      const offset = (page - 1) * itemsPerPage;
-      const queryParams = new URLSearchParams({
-        limit: itemsPerPage.toString(),
-        offset: offset.toString(),
-        genre: genreFilter || '',
-        search: searchQuery || '',
-        search_type: searchType
-      });
-
-      console.debug("Fetching songs with params:", {
-        page,
-        offset,
-        genre: genreFilter,
-        search: searchQuery,
-        searchType
-      });
-
-      const response = await fetch(`${API_URL}/playlists/songs?${queryParams}`);
+      const offset = (page - 1) * songsPerPage;
+      const response = await fetch(
+        `${API_URL}/playlists/songs?limit=${songsPerPage}&offset=${offset}${
+          genreFilter && genreFilter !== 'All' ? `&genre=${genreFilter}` : ''
+        }${searchQuery ? `&search=${searchQuery}&search_type=${searchType}` : ''}`,
+        {
+          credentials: 'include',
+        }
+      );
       
       if (!response.ok) {
-        throw new Error(`Server error: ${response.statusText}`);
+        throw new Error('Failed to fetch songs');
       }
-      
+
       const data = await response.json();
-      console.debug("Songs fetched:", data);
-      
       setSongs(data.songs);
-      setTotalSongs(data.total_count);
-      setCurrentPage(page);
+      setTotalPages(Math.ceil(data.total_count / songsPerPage));
     } catch (error) {
-      console.error("Error fetching songs:", error);
-      setMessage(`Error: ${error.message}`);
-      setSongs([]);
-      setTotalSongs(0);
-    } finally {
-      setLoading(false);
+      console.error('Error fetching songs:', error);
+      setMessage('Failed to fetch songs');
     }
   };
 
@@ -425,71 +488,69 @@ export default function RecommendationPage() {
     }
   };
 
-  const renderPagination = () => {
-    const totalPages = Math.ceil(totalSongs / itemsPerPage);
-    const pages = [];
-    
-    // Show max 5 pages with current page in the middle when possible
+  const Pagination = () => {
+    const pageNumbers = [];
     let startPage = Math.max(1, currentPage - 2);
-    let endPage = Math.min(totalPages, startPage + 4);
-    
-    if (endPage - startPage < 4) {
-      startPage = Math.max(1, endPage - 4);
+    let endPage = Math.min(totalPages, currentPage + 2);
+
+    // Always show first page
+    if (startPage > 1) {
+      pageNumbers.push(1);
+      if (startPage > 2) pageNumbers.push('...');
     }
 
+    // Add pages around current page
     for (let i = startPage; i <= endPage; i++) {
-      pages.push(
-        <button
-          key={i}
-          onClick={() => {
-            setCurrentPage(i);
-            fetchSongs(i);
-          }}
-          className={`px-3 py-1 rounded ${
-            currentPage === i
-              ? "bg-blue-500 text-white"
-              : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-          }`}
-        >
-          {i}
-        </button>
-      );
+      pageNumbers.push(i);
+    }
+
+    // Always show last page
+    if (endPage < totalPages) {
+      if (endPage < totalPages - 1) pageNumbers.push('...');
+      pageNumbers.push(totalPages);
     }
 
     return (
-      <div className="flex space-x-2">
-        {currentPage > 1 && (
-          <button
-            onClick={() => {
-              setCurrentPage(currentPage - 1);
-              fetchSongs(currentPage - 1);
-            }}
-            className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
-          >
-            Previous
-          </button>
-        )}
-        {pages}
-        {currentPage < totalPages && (
-          <button
-            onClick={() => {
-              setCurrentPage(currentPage + 1);
-              fetchSongs(currentPage + 1);
-            }}
-            className="px-3 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
-          >
-            Next
-          </button>
-        )}
+      <div className="flex justify-center gap-2 mt-4">
+        {pageNumbers.map((number, index) => (
+          number === '...' ? (
+            <span key={`ellipsis-${index}`} className="px-3 py-2">...</span>
+          ) : (
+            <button
+              key={number}
+              onClick={() => {
+                setCurrentPage(number);
+                fetchSongs(number);
+              }}
+              className={`px-3 py-2 rounded ${
+                currentPage === number
+                  ? 'bg-white text-black'
+                  : 'border border-white/[0.2] hover:bg-white/[0.1]'
+              }`}
+            >
+              {number}
+            </button>
+          )
+        ))}
       </div>
     );
   };
 
   const handleMoodChange = async (newMood) => {
+    console.log(`=== Changing Mood to ${newMood} ===`);
     const userId = sessionStorage.getItem("user_id");
+    
+    if (!userId) {
+      console.error("No user ID found in session");
+      setMessage("Please log in to update mood");
+      return;
+    }
+
     try {
+      console.log("Sending mood update request...");
       const response = await fetch(`${API_URL}/recommendation/mood`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -499,29 +560,41 @@ export default function RecommendationPage() {
         })
       });
 
+      const data = await response.json();
+      
       if (response.ok) {
+        console.log("Mood updated successfully:", data);
         setCurrentMood(newMood);
-        handleGenerateRecommendations();
+        setMessage("Mood updated successfully!");
+        // Fetch new recommendations with updated mood
+        await handleGenerateRecommendations();
       } else {
-        console.error("Failed to update mood");
+        console.error("Failed to update mood:", data.error);
+        setMessage(`Failed to update mood: ${data.error}`);
       }
     } catch (error) {
       console.error("Error updating mood:", error);
+      setMessage("Error updating mood. Please try again.");
     }
   };
 
   useEffect(() => {
     const fetchCurrentMood = async () => {
+      console.log("Fetching mood for user...");
       try {
         const userId = sessionStorage.getItem("user_id");
-        const response = await fetch(`${API_URL}/recommendation/mood?user_id=${userId}`, {
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json'
+        const response = await fetch(
+          `${API_URL}/recommendation/mood?user_id=${userId}`,
+          {
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json'
+            }
           }
-        });
+        );
         if (response.ok) {
           const data = await response.json();
+          console.log("Current mood fetched:", data.mood);
           setCurrentMood(data.mood);
         }
       } catch (error) {
@@ -564,190 +637,439 @@ export default function RecommendationPage() {
     </div>
   );
 
+  // Handle feedback submission
+  const handleFeedback = async (songId, isLiked) => {
+    console.log(`Processing feedback for song ${songId}: ${isLiked ? 'liked' : 'disliked'}`);
+    try {
+      setMessage("");
+      const userId = sessionStorage.getItem("user_id");
+      
+      // Update feedback status
+      setFeedbackStatus(prev => ({
+        ...prev,
+        [songId]: isLiked ? 'liked' : 'disliked'
+      }));
+
+      // Add to pending feedback
+      setPendingFeedback(prev => [...prev, {
+        user_id: userId,
+        song_id: songId,
+        is_liked: isLiked,
+        mood: currentMood
+      }]);
+
+      console.log("Feedback added to pending list");
+    } catch (error) {
+      console.error("Error handling feedback:", error);
+      setMessage("Failed to record feedback");
+    }
+  };
+
+  // Submit pending feedback and refresh recommendations
+  const submitFeedbackAndRefresh = async () => {
+    console.log("Submitting feedback and refreshing recommendations...");
+    try {
+      // Submit all pending feedback
+      for (const feedback of pendingFeedback) {
+        const response = await fetch(`${API_URL}/recommendation/feedback`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(feedback)
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to submit feedback: ${response.statusText}`);
+        }
+        console.log(`Feedback submitted for song ${feedback.song_id}`);
+      }
+
+      // Clear pending feedback
+      setPendingFeedback([]);
+      
+      // Fetch new recommendations
+      await fetchRecommendations();
+      console.log("Recommendations refreshed after feedback");
+
+    } catch (error) {
+      console.error("Error in submitFeedbackAndRefresh:", error);
+      setMessage("Failed to update recommendations");
+    }
+  };
+
+  // Fetch recommendations
+  const fetchRecommendations = async () => {
+    console.log("Fetching recommendations...");
+    try {
+      const userId = sessionStorage.getItem("user_id");
+      const response = await fetch(
+        `${API_URL}/recommendation/initial?user_id=${userId}&use_user_songs=${useUserSongs}`,
+        {
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log("Recommendations received:", data.recommendations.length);
+        setRecommendations(data.recommendations);
+        setFeedbackStatus({}); // Reset feedback status for new recommendations
+      }
+    } catch (error) {
+      console.error("Error fetching recommendations:", error);
+      setMessage("Failed to load recommendations");
+    }
+  };
+
+  // Render recommendations section
+  const renderRecommendations = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {recommendations.map((song) => (
+        <SongCard
+          key={song.song_id}
+          song={song}
+          onLike={() => handleFeedback(song.song_id, true)}
+          onDislike={() => handleFeedback(song.song_id, false)}
+          feedbackStatus={feedbackStatus}
+          onAddToPlaylist={(song) => {
+            setSelectedSong(song);
+            setIsPlaylistModalOpen(true);
+          }}
+        />
+      ))}
+    </div>
+  );
+
+  const handleAddToPlaylist = (song) => {
+    setSelectedSong(song);
+    setIsPlaylistModalOpen(true);
+  };
+
+  const handleAddToExistingPlaylist = async (playlistId) => {
+    try {
+      const userId = sessionStorage.getItem("user_id");
+      const response = await fetch(`${API_URL}/playlists/edit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          playlist_id: playlistId,
+          song_ids: [selectedSong.song_id]
+        })
+      });
+
+      if (response.ok) {
+        setMessage("Song added to playlist successfully!");
+      } else {
+        setMessage("Failed to add song to playlist");
+      }
+    } catch (error) {
+      console.error("Error adding to playlist:", error);
+      setMessage("Error adding song to playlist");
+    } finally {
+      setIsPlaylistModalOpen(false);
+      setSelectedSong(null);
+    }
+  };
+
+  const handleCreateNewPlaylist = async (playlistName) => {
+    try {
+      const userId = sessionStorage.getItem("user_id");
+      const response = await fetch(`${API_URL}/playlists/add`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          name: playlistName,
+          song_ids: [selectedSong.song_id]
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPlaylists([...playlists, data.playlist]);
+        setMessage("New playlist created and song added successfully!");
+      } else {
+        setMessage("Failed to create playlist");
+      }
+    } catch (error) {
+      console.error("Error creating playlist:", error);
+      setMessage("Error creating playlist");
+    } finally {
+      setIsPlaylistModalOpen(false);
+      setSelectedSong(null);
+    }
+  };
+
   return (
-    <div className="h-screen flex flex-col bg-black text-white">
-      {/* Floating Navbar */}
-      <nav className="fixed top-0 left-0 w-full bg-gradient-to-r from-green-700 via-green-600 to-green-500 text-white shadow-md z-10">
-        <div className="flex justify-between items-center px-6 py-3">
-          <h1 className="text-2xl font-bold">Amano</h1>
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <span>Current Mood:</span>
-              <select
-                value={currentMood}
-                onChange={(e) => handleMoodChange(e.target.value)}
-                className="bg-black bg-opacity-40 rounded px-2 py-1 text-white"
-              >
-                {moods.map((mood) => (
-                  <option key={mood} value={mood}>
-                    {mood}
-                  </option>
-                ))}
-              </select>
+    <div className="relative min-h-screen font-ubuntu-mono">
+      {/* Vortex Background with custom settings */}
+      <Vortex
+        particleCount={800}           // More particles for denser effect
+        rangeY={250}                   // Larger vertical movement
+        baseSpeed={0.01}                // Faster base movement
+        rangeSpeed={0.5}               // More speed variation
+        baseRadius={1.25}               // Larger particles
+        rangeRadius={3}                // More size variation
+        baseHue={200}                  // Different base color (180 = cyan)
+        backgroundColor="rgba(0, 0, 0, 0.9)"  // Slightly more opaque background
+        containerClassName="fixed inset-0 w-full h-full"  // Fill entire viewport
+      />
+
+      {/* Main content with higher z-index */}
+      <div className="relative z-10">
+        <div className="relative z-50">
+          <Menu setActive={setActiveItem}>
+            <MenuItem 
+              setActive={setActiveItem}
+              active={activeItem}
+              item="Home"
+            >
+              <NavSection
+                title="Home"
+                description="Return to the main dashboard"
+                href="#home"
+              />
+            </MenuItem>
+
+            <MenuItem
+              setActive={setActiveItem}
+              active={activeItem}
+              item="Songs"
+            >
+              <NavSection
+                title="Songs"
+                description="Browse and manage your music collection"
+                href="#songs"
+              />
+            </MenuItem>
+
+            <MenuItem
+              setActive={setActiveItem}
+              active={activeItem}
+              item="Playlists"
+            >
+              <NavSection
+                title="Playlists"
+                description="Manage your custom playlists"
+                href="#playlists"
+              />
+            </MenuItem>
+
+            <MenuItem
+              setActive={setActiveItem}
+              active={activeItem}
+              item="Recommendations"
+            >
+              <NavSection
+                title="Recommendations"
+                description="Get personalized music suggestions"
+                href="#recommendations"
+              />
+            </MenuItem>
+          </Menu>
+        </div>
+
+        {/* Add padding-top to account for fixed navbar */}
+        <div className="pt-16">
+          {/* Home Section */}
+          <section id="home" className="min-h-screen p-6 flex items-center justify-center bg-transparent">
+            <div className="text-center">
+              <h1 className="text-9xl font-bold tracking-wider mb-4">
+                AMANO
+              </h1>
+              <p className="text-2xl text-gray-400">Your Personal Music Companion</p>
             </div>
-            <button
-              onClick={() => {
-                setShowSongsSection(true);
-                fetchSongs();
-              }}
-              className="px-4 py-2 bg-black bg-opacity-40 rounded hover:bg-opacity-60"
-            >
-              Add Playlist
-            </button>
-            <button
-              onClick={handleGenerateRecommendations}
-              className="px-4 py-2 bg-blue-500 rounded hover:bg-blue-400"
-            >
-              Get Recommendations
-            </button>
-          </div>
-        </div>
-      </nav>
+          </section>
 
-      {/* Main Content */}
-      <div className="flex-1 mt-16 overflow-y-scroll p-6 space-y-6">
-        {/* Playlists Section */}
-        <div className="bg-gradient-to-b from-gray-900 to-black p-6 rounded-lg shadow-lg">
-          <h2 className="text-xl font-semibold">Your Playlists</h2>
-          <ul className="space-y-4">
-            {playlists.map((playlist) => (
-              <li
-                key={playlist.playlist_id}
-                className="flex justify-between items-center bg-gray-800 p-4 rounded-lg"
-              >
-                <span>{playlist.name}</span>
-                <div className="space-x-2">
-                  <button
-                    onClick={() => handleEditPlaylist(playlist)}
-                    className="px-3 py-1 bg-blue-500 rounded hover:bg-blue-400"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeletePlaylist(playlist.playlist_id)}
-                    className="px-3 py-1 bg-red-500 rounded hover:bg-red-400"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Songs Section */}
-        {showSongsSection && (
-          <div className="bg-gradient-to-b from-gray-900 to-black p-6 rounded-lg shadow-lg">
-            <h2 className="text-xl font-semibold mb-4">
-              {editingPlaylist ? 'Edit Playlist' : 'Add Songs to Playlist'}
-            </h2>
-            <input
-              type="text"
-              placeholder="Playlist Name"
-              value={playlistName}
-              onChange={(e) => setPlaylistName(e.target.value)}
-              className="w-full mb-4 px-4 py-2 rounded-lg text-black"
-            />
-            <div className="flex flex-wrap gap-4 items-center mb-4">
-              <GenreFilter />
+          {/* Songs Section */}
+          <section id="songs" className="min-h-screen p-6 bg-transparent">
+            <h2 className="text-4xl font-bold text-center mb-12">Discover Songs</h2>
+            <div className="max-w-6xl mx-auto">
               <input
                 type="text"
-                placeholder="Search songs..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-grow px-4 py-2 rounded-lg text-black"
+                placeholder="Playlist Name"
+                value={playlistName}
+                onChange={(e) => setPlaylistName(e.target.value)}
+                className="w-full mb-4 px-4 py-2 bg-transparent border border-white/[0.2] rounded-lg"
               />
-              <select
-                value={searchType}
-                onChange={(e) => setSearchType(e.target.value)}
-                className="px-4 py-2 rounded-lg text-black"
-              >
-                <option value="track">Search by Track</option>
-                <option value="artist">Search by Artist</option>
-              </select>
-              <button
-                onClick={() => {
-                  setCurrentPage(1);
-                  fetchSongs(1);
-                }}
-                className="px-4 py-2 bg-blue-500 rounded hover:bg-blue-400"
-              >
-                Search
-              </button>
-            </div>
+              
+              <div className="flex flex-wrap gap-4 items-center mb-4">
+                <GenreFilter />
+                <input
+                  type="text"
+                  placeholder="Search songs..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="flex-grow px-4 py-2 bg-transparent border border-white/[0.2] rounded-lg"
+                />
+                <select
+                  value={searchType}
+                  onChange={(e) => setSearchType(e.target.value)}
+                  className="px-4 py-2 bg-transparent border border-white/[0.2] rounded-lg"
+                >
+                  <option value="track">Search by Track</option>
+                  <option value="artist">Search by Artist</option>
+                </select>
+                <button 
+                  onClick={() => { 
+                    setCurrentPage(1); 
+                    fetchSongs(1); 
+                  }}
+                  className="px-4 py-2 bg-white text-black rounded hover:bg-gray-200 transition-colors"
+                >
+                  Search
+                </button>
+              </div>
 
-            {/* Songs Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-              {loading ? (
-                <div className="col-span-full text-center py-4">Loading...</div>
-              ) : songs.length > 0 ? (
-                songs.map((song) => (
+              {/* Songs Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                {songs.map((song) => (
                   <div
                     key={song.song_id}
-                    className={`p-4 rounded-lg cursor-pointer ${
-                      selectedSongs.includes(song.song_id)
-                        ? "bg-green-500"
-                        : "bg-gray-700 hover:bg-gray-600"
-                    }`}
                     onClick={() => toggleSongSelection(song.song_id)}
+                    className={`p-4 rounded-lg cursor-pointer bg-black/80 backdrop-blur-sm ${
+                      selectedSongs.includes(song.song_id)
+                        ? "border-2 border-green-500 text-green-500"
+                        : "border border-white/[0.2] hover:border-white"
+                    }`}
                   >
                     <h3 className="font-bold">{song.track_name}</h3>
                     <p>{song.artist_name}</p>
                     <p className="text-sm text-gray-300">{song.track_genre}</p>
                   </div>
-                ))
-              ) : (
-                <div className="col-span-full text-center py-4">No songs found</div>
-              )}
+                ))}
+              </div>
+
+              {/* Pagination */}
+              <Pagination />
+
+              {/* Existing buttons */}
+              <div className="flex justify-between mt-4">
+                <button
+                  onClick={() => setSelectedSongs([])}
+                  className="px-4 py-2 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-black">
+                  Clear Selection
+                </button>
+                <button
+                  onClick={handleAddPlaylist}
+                  className="px-4 py-2 border border-green-500 text-green-500 rounded hover:bg-green-500 hover:text-black">
+                  Add Playlist
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Playlists Section */}
+          <section id="playlists" className="min-h-screen p-6 bg-transparent">
+            <h2 className="text-4xl font-bold text-center mb-12">Your Playlists</h2>
+            <div className="max-w-6xl mx-auto">
+              <div className="grid gap-4">
+                {playlists.map((playlist) => (
+                  <div 
+                    key={playlist.playlist_id} 
+                    className="bg-black/40 backdrop-blur-sm border border-white/[0.2] rounded-lg p-4 flex justify-between items-center"
+                  >
+                    <span>{playlist.name}</span>
+                    <div className="space-x-2">
+                      <button 
+                        onClick={() => handleEditPlaylist(playlist)}
+                        className="px-3 py-1 border border-blue-500 text-blue-500 rounded hover:bg-blue-500 hover:text-black"
+                      >
+                        Edit
+                      </button>
+                      <button 
+                        onClick={() => handleDeletePlaylist(playlist.playlist_id)}
+                        className="px-3 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-black"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* Recommendations Section */}
+          <section id="recommendations" className="min-h-screen p-6 bg-transparent">
+            <h2 className="text-4xl font-bold text-center mb-12">Your Recommendations</h2>
+            
+            {/* Mood and Source Selection */}
+            <div className="max-w-6xl mx-auto mb-8 flex justify-center gap-4">
+              {/* Mood Selector */}
+              <div className="flex items-center space-x-4">
+                <label className="text-sm font-medium">Current Mood:</label>
+                <select
+                  value={currentMood}
+                  onChange={(e) => setCurrentMood(e.target.value)}
+                  className="bg-gray-800 text-white rounded px-3 py-1"
+                >
+                  {moods.map((mood) => (
+                    <option key={mood} value={mood}>
+                      {mood}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Source Toggle */}
+              <RecommendationSourceToggle 
+                useUserSongs={useUserSongs} 
+                setUseUserSongs={setUseUserSongs} 
+              />
             </div>
 
-            {/* Pagination */}
-            <div className="flex justify-center space-x-2 mb-4">
-              {renderPagination()}
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex justify-end space-x-4">
+            {/* Generate Button */}
+            <div className="flex justify-center mb-8">
               <button
-                onClick={() => {
-                  setShowSongsSection(false);
-                  setEditingPlaylist(null);
-                }}
-                className="px-4 py-2 bg-red-500 rounded-lg hover:bg-red-400"
+                onClick={handleGenerateRecommendations}
+                className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-full transition-colors"
               >
-                Cancel
-              </button>
-              <button
-                onClick={editingPlaylist ? handleSaveEdit : handleAddPlaylist}
-                className="px-4 py-2 bg-green-500 rounded-lg hover:bg-green-400"
-              >
-                {editingPlaylist ? 'Save Changes' : 'Save Playlist'}
+                Generate Recommendations
               </button>
             </div>
-          </div>
-        )}
 
-        {/* Recommendations Section */}
-        <div className="bg-gradient-to-b from-gray-900 to-black p-6 rounded-lg shadow-lg">
-          <h2 className="text-xl font-semibold mb-4">Recommendations</h2>
-          <RecommendationSourceToggle 
-            useUserSongs={useUserSongs} 
-            setUseUserSongs={setUseUserSongs}
-          />
-          <ul className="space-y-4">
-            {recommendations.map((song) => (
-              <li
-                key={song.song_id}
-                className="flex justify-between items-center bg-gray-800 p-4 rounded-lg"
-              >
-                <span>
-                  {song.track_name} - {song.artist_name}
-                </span>
-              </li>
-            ))}
-          </ul>
+            {/* Recommendations Grid */}
+            <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {recommendations.map((song) => (
+                <SongCard
+                  key={song.song_id}
+                  song={song}
+                  onLike={() => handleFeedback(song.song_id, true)}
+                  onDislike={() => handleFeedback(song.song_id, false)}
+                  feedbackStatus={feedbackStatus}
+                  onAddToPlaylist={(song) => {
+                    setSelectedSong(song);
+                    setIsPlaylistModalOpen(true);
+                  }}
+                />
+              ))}
+            </div>
+          </section>
         </div>
       </div>
+
+      {/* Playlist Modal */}
+      <PlaylistModal
+        isOpen={isPlaylistModalOpen}
+        onClose={() => {
+          setIsPlaylistModalOpen(false);
+          setSelectedSong(null);
+        }}
+        onSubmit={handleAddToExistingPlaylist}
+        onCreateNew={handleCreateNewPlaylist}
+        playlists={playlists}
+      />
     </div>
   );
 }
