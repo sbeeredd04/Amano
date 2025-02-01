@@ -10,8 +10,9 @@ import { faHeart as fasHeart } from '@fortawesome/free-solid-svg-icons';
 import { faHeart as farHeart } from '@fortawesome/free-regular-svg-icons';
 import { faThumbsDown as fasThumbsDown } from '@fortawesome/free-solid-svg-icons';
 import { faThumbsDown as farThumbsDown } from '@fortawesome/free-regular-svg-icons';
+import { faRotate } from '@fortawesome/free-solid-svg-icons';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://70bnmmdc-5000.usw3.devtunnels.ms';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://70bnmmdc-5000.usw3.devtunnels.ms/';
 
 const SongCard = ({ song, onLike, onDislike, feedbackStatus, onAddToPlaylist, isUserSong }) => (
   <div className={`bg-black/60 backdrop-blur-sm p-4 rounded-lg shadow-lg relative 
@@ -238,44 +239,72 @@ export default function RecommendationPage() {
       }
     };
 
-    const fetchInitialData = async () => {
+    const fetchData = async () => {
       try {
-        console.log("Fetching initial data...");
-        console.debug(`Parameters: user_id=${userId}, use_user_songs=${useUserSongs}`);
+        // Only fetch playlists and mood
+        await Promise.all([
+          fetchPlaylists(),
+          fetchMood()
+        ]);
         
-        const response = await fetch(
-          `${API_URL}/recommendation/initial?user_id=${userId}&use_user_songs=${useUserSongs}`,
-          {
-            method: 'GET',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-            }
-          }
-        );
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.debug("Received recommendations:", data);
-        setRecommendations(data.recommendations || []);
+        // Log initial state
+        console.debug("Initial data loaded");
+        console.debug(`Current mood: ${currentMood}`);
+        console.debug(`Use user songs: ${useUserSongs}`);
+        
       } catch (error) {
         console.error("Error fetching initial data:", error);
         setMessage(`Error: ${error.message}`);
       }
     };
 
-    fetchPlaylists();
-    fetchMood();
-    fetchInitialData();
+    fetchData();
   }, [router]);
 
-  const handleGenerateRecommendations = async () => {
+  // Add a separate useEffect to trigger recommendations when needed
+  useEffect(() => {
+    // Only generate recommendations if we have a mood and userId
+    if (currentMood && userId) {
+      handleInitialRecommendations();
+    }
+  }, [currentMood, userId]);
+
+  const handleInitialRecommendations = async () => {
     try {
-      setMessage("Generating recommendations...");
+      setMessage("Getting recommendations...");
+      
+      const response = await fetch(`${API_URL}/recommendation/recs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          mood: currentMood,
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setRecommendations({
+          new_songs: data.recommendations?.recommendation_pool || [],
+          user_songs: data.recommendations?.user_songs || [],
+          has_dqn_model: data.recommendations?.has_dqn_model || false,
+          source: data.recommendations?.source || 'clustering'
+        });
+        setMessage("");
+      } else {
+        throw new Error(data.error || 'Failed to get recommendations');
+      }
+    } catch (error) {
+      console.error("Error getting recommendations:", error);
+      setMessage(`Error: ${error.message}`);
+    }
+  };
+
+  const handleRefreshRecommendations = async () => {
+    try {
+      setMessage("Refreshing recommendations...");
       
       const response = await fetch(`${API_URL}/recommendation/refresh`, {
         method: 'POST',
@@ -285,19 +314,24 @@ export default function RecommendationPage() {
         body: JSON.stringify({
           user_id: userId,
           mood: currentMood,
-          use_user_songs: useUserSongs
+          use_user_songs: useUserSongs,
+          previous_recommendations: recommendations.new_songs || [],
+          refresh_type: 'smart'
         }),
       });
 
       const data = await response.json();
       if (response.ok) {
-        setRecommendations(data.recommendations);
-        setMessage(`Generated ${data.recommendations.length} recommendations using ${data.source}`);
+        setRecommendations({
+          new_songs: data.recommendations.new_songs,
+          user_songs: data.recommendations.user_songs
+        });
+        setMessage(`Refreshed recommendations using ${data.source}`);
       } else {
         setMessage(`Error: ${data.error}`);
       }
     } catch (error) {
-      setMessage("Error generating recommendations");
+      setMessage("Error refreshing recommendations");
       console.error(error);
     }
   };
@@ -539,7 +573,7 @@ export default function RecommendationPage() {
         setCurrentMood(newMood);
         setMessage("Mood updated successfully!");
         // Fetch new recommendations with updated mood
-        await handleGenerateRecommendations();
+        await handleInitialRecommendations();
       } else {
         console.error("Failed to update mood:", data.error);
         setMessage(`Failed to update mood: ${data.error}`);
@@ -1151,7 +1185,7 @@ export default function RecommendationPage() {
                 </div>
 
                 <button
-                  onClick={handleGenerateRecommendations}
+                  onClick={handleInitialRecommendations}
                   className="bg-green-400/20 hover:bg-green-400/40 text-green-400 px-6 py-1 rounded-lg transition-colors border border-green-400/20"
                 >
                   Generate Recommendations
@@ -1163,7 +1197,19 @@ export default function RecommendationPage() {
               {/* New Songs Section */}
               {recommendations.new_songs?.length > 0 && (
                 <div className="mb-12">
-                  <h3 className="text-2xl font-semibold mb-6">Recommended Songs</h3>
+                  <div className="flex items-center gap-4 mb-6">
+                    <h3 className="text-2xl font-semibold">Recommended Songs</h3>
+                    <button
+                      onClick={handleRefreshRecommendations}
+                      className="text-gray-400 hover:text-white transition-colors"
+                      title="Refresh Recommendations"
+                    >
+                      <FontAwesomeIcon 
+                        icon={faRotate}
+                        className="w-5 h-5"
+                      />
+                    </button>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {recommendations.new_songs.map((song) => (
                       <SongCard
