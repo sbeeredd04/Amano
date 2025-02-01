@@ -86,7 +86,6 @@ def refresh_recommendations():
         if not user_id:
             return jsonify({"error": "User ID is required"}), 400
             
-        # Get stored recommendation pool
         session = get_session()
         try:
             pool = session.query(RecommendationPool)\
@@ -94,49 +93,39 @@ def refresh_recommendations():
                 .first()
                 
             if not pool:
-                logger.info("No recommendation pool found - generating new pool")
-                # Generate new pool if none exists
-                pool_data = generate_recommendation_pool(
-                    user_id=user_id,
-                    current_mood=data.get('mood', 'Calm'),
-                    df_scaled=df_scaled
-                )
-                
-                # Store the new pool
-                new_pool = RecommendationPool(
-                    user_id=user_id,
-                    recommendation_pool=pool_data['recommendation_pool'],
-                    user_songs_pool=pool_data['user_songs'],
-                    created_at=datetime.utcnow()
-                )
-                session.add(new_pool)
-                session.commit()
-                
-                recommendations = pool_data
-                source = 'new'
-            else:
-                logger.info("Found existing recommendation pool")
-                # Get refreshed recommendations from existing pool
-                refreshed_data = refresh_from_pool(
-                    pool=pool.serialize(),
-                    previous_recs=previous_recs,
-                    refresh_type=refresh_type
-                )
-                recommendations = {
+                logger.error("No recommendation pool found for refresh")
+                return jsonify({"error": "No recommendation pool found"}), 404
+            
+            logger.debug(f"Found pool with {len(pool.recommendation_pool)} recommendations")
+            logger.debug(f"User songs in pool: {len(pool.user_songs_pool)}")
+            
+            refreshed_data = refresh_from_pool(
+                pool={
+                    'recommendation_pool': pool.recommendation_pool,
+                    'user_songs_pool': pool.user_songs_pool,
+                    'user_id': user_id
+                },
+                previous_recs=previous_recs,
+                refresh_type=refresh_type
+            )
+            
+            logger.debug("Refreshed data received:")
+            logger.debug(f"- New songs: {len(refreshed_data['new_songs'])}")
+            logger.debug(f"- User songs: {len(refreshed_data['user_songs'])}")
+            logger.debug(f"- Source: {refreshed_data['source']}")
+            
+            return jsonify({
+                "recommendations": {
                     'recommendation_pool': refreshed_data['new_songs'],
                     'user_songs': refreshed_data['user_songs'],
                     'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
                     'source': refreshed_data['source']
-                }
-                source = refreshed_data['source']
-            
-            return jsonify({
-                "recommendations": recommendations,
-                "source": source
+                },
+                "source": refreshed_data['source']
             }), 200
             
         except Exception as e:
-            logger.error(f"Error refreshing recommendations: {str(e)}", exc_info=True)
+            logger.error(f"Error in refresh: {str(e)}", exc_info=True)
             session.rollback()
             return jsonify({"error": str(e)}), 500
         finally:

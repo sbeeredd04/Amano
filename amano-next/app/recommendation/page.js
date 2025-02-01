@@ -358,18 +358,35 @@ export default function RecommendationPage() {
       });
 
       const data = await response.json();
-      console.debug("Received refreshed recommendations:", {
-        totalRecs: data.recommendations?.new_songs?.length || 0,
+      console.debug("Received refreshed data:", {
+        newSongs: data.recommendations?.recommendation_pool?.length || 0,
         userSongs: data.recommendations?.user_songs?.length || 0,
         source: data.source
       });
 
       if (response.ok) {
-        setRecommendations(data.recommendations.new_songs || []);
+        // Also fetch full song details for user songs
+        const userSongIds = data.recommendations.user_songs || [];
+        console.debug("Fetching details for refreshed user songs:", userSongIds);
+        
+        // Fetch song details if not already in songs array
+        const missingSongs = userSongIds.filter(id => !songs.find(s => s.song_id === id));
+        if (missingSongs.length > 0) {
+          const songDetailsResponse = await fetch(
+            `${API_URL}/playlists/songs?ids=${missingSongs.join(',')}`
+          );
+          if (songDetailsResponse.ok) {
+            const songDetails = await songDetailsResponse.json();
+            setSongs(prevSongs => [...prevSongs, ...songDetails.songs]);
+          }
+        }
+
+        setRecommendations(data.recommendations.recommendation_pool || []);
         setUserSongs(data.recommendations.user_songs || []);
         console.debug("Updated state with refreshed recommendations:", {
-          recsCount: data.recommendations.new_songs?.length || 0,
-          userSongsCount: data.recommendations.user_songs?.length || 0
+          recsCount: data.recommendations.recommendation_pool?.length || 0,
+          userSongsCount: userSongIds.length,
+          songDetails: songs.length
         });
         setMessage("");
       } else {
@@ -1259,7 +1276,7 @@ export default function RecommendationPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {recommendations.map((song) => (
                       <SongCard
-                        key={song.song_id}
+                        key={`rec-${song.song_id}`}
                         song={song}
                         onLike={() => handleFeedback(song.song_id, true)}
                         onDislike={() => handleFeedback(song.song_id, false)}
