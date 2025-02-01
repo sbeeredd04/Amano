@@ -663,35 +663,49 @@ def get_cluster_based_recommendations(user_songs, df_scaled, n_recommendations=1
         logger.error(f"Error in cluster-based recommendations: {str(e)}")
         return get_default_recommendations(df_scaled)
 
-def get_popular_recommendations(user_id, genres, mood, limit, exclude_songs):
-    """Get popular songs matching user preferences with genre weighting."""
-    session = get_session()
+def get_popular_recommendations(user_id, genres=None, mood=None, limit=10, exclude_songs=None):
+    """Get popular song recommendations with optional genre and mood filtering."""
     try:
-        # Get base query for popular songs in the given genres
-        base_query = session.query(Song)\
-            .filter(Song.track_genre.in_(genres))\
-            .filter(Song.song_id.notin_([s['song_id'] for s in exclude_songs]))
+        logger.info(f"Getting popular recommendations:")
+        logger.info(f"- User ID: {user_id}")
+        logger.info(f"- Genres: {genres}")
+        logger.info(f"- Mood: {mood}")
+        logger.info(f"- Limit: {limit}")
         
-        # Get top songs by popularity
-        popular_songs = base_query.order_by(Song.popularity.desc()).limit(limit * 2).all()
+        session = get_session()
+        query = session.query(Song)
         
-        # Convert to DataFrame for weighted selection
-        songs_df = pd.DataFrame([song.serialize() for song in popular_songs])
-        if songs_df.empty:
-            return []
+        # Filter by genres if provided
+        if genres:
+            query = query.filter(Song.track_genre.in_(genres))
             
-        # Normalize popularity scores
-        songs_df['popularity_norm'] = (songs_df['popularity'] - songs_df['popularity'].min()) / \
-                                    (songs_df['popularity'].max() - songs_df['popularity'].min())
+        # Exclude songs if provided
+        if exclude_songs:
+            exclude_ids = [song.get('song_id') if isinstance(song, dict) else song 
+                         for song in exclude_songs]
+            query = query.filter(~Song.song_id.in_(exclude_ids))
+            
+        # Order by popularity and get recommendations
+        recommendations = query.order_by(Song.popularity.desc())\
+            .limit(limit)\
+            .all()
+            
+        # Convert to dictionary format
+        recommendations = [{
+            'song_id': song.song_id,
+            'track_name': song.track_name,
+            'artist_name': song.artists,
+            'track_genre': song.track_genre,
+            'popularity': song.popularity,
+            'similarity': 0.5  # Default similarity for popular recommendations
+        } for song in recommendations]
         
-        # Add random variation to avoid always selecting the same songs
-        songs_df['random_weight'] = np.random.uniform(0.8, 1.0, len(songs_df))
-        songs_df['final_score'] = songs_df['popularity_norm'] * songs_df['random_weight']
+        logger.info(f"Found {len(recommendations)} popular recommendations")
+        return recommendations
         
-        # Select final recommendations
-        final_recommendations = songs_df.nlargest(limit, 'final_score')
-        return final_recommendations.to_dict('records')
-        
+    except Exception as e:
+        logger.error(f"Error getting popular recommendations: {str(e)}", exc_info=True)
+        return []
     finally:
         session.close()
 
@@ -753,59 +767,63 @@ def generate_recommendation_pool(user_id, current_mood, df_scaled):
             logger.info("Falling back to popularity-based recommendations")
             popular_recs = get_popular_recommendations(
                 user_id=user_id,
-                genres=None,
-                mood=None,
-                limit=200,
-                exclude_songs=[]
+                limit=200,  # Get more recommendations for the pool
+                exclude_songs=user_songs  # Exclude user's songs
             )
             if not popular_recs:
                 raise Exception("Failed to generate any recommendations")
             cluster_recommendations = popular_recs
+            
+        logger.info(f"Generated {len(cluster_recommendations)} initial recommendations")
         
         # Check if DQN model exists and has enough feedback
         session = get_session()
-        history_count = session.query(UserHistory)\
-            .filter_by(user_id=user_id)\
-            .count()
-        model_exists = os.path.exists(f'models/dqn/dqn_user_{user_id}.pth')
-        
-        logger.info(f"User has {history_count} feedback entries")
-        logger.info(f"DQN model exists: {model_exists}")
-        
-        final_recommendations = cluster_recommendations
-        source = 'clustering'
-        
-        if model_exists:
-            # Try DQN recommendations
-            try:
-                dqn_recommendations = get_dqn_recommendations(
-                    user_id=user_id,
-                    df_scaled=df_scaled,
-                    current_mood=current_mood
-                )
-                if dqn_recommendations:
-                    final_recommendations = dqn_recommendations
-                    source = 'dqn'
-                    logger.info("Successfully generated DQN recommendations")
-            except Exception as e:
-                logger.error(f"Error getting DQN recommendations: {e}")
-                # Continue with cluster recommendations
-        
-        # Start background training if enough feedback
-        if history_count >= 5:
-            logger.info("Feedback threshold reached - initiating background DQN training")
-            Thread(target=run_background_training, 
-                   args=(user_id, df_scaled, FEATURES, FEATURE_WEIGHTS)).start()
-        
-        logger.info(f"Final recommendation pool size: {len(final_recommendations)}")
-        
-        return {
-            'recommendation_pool': final_recommendations,
-            'user_songs': user_songs,
-            'has_dqn_model': model_exists,
-            'source': source
-        }
-        
+        try:
+            history_count = session.query(UserHistory)\
+                .filter_by(user_id=user_id)\
+                .count()
+            model_exists = os.path.exists(f'models/dqn/dqn_user_{user_id}.pth')
+            
+            logger.info(f"User has {history_count} feedback entries")
+            logger.info(f"DQN model exists: {model_exists}")
+            
+            final_recommendations = cluster_recommendations
+            source = 'clustering'
+            
+            if model_exists:
+                # Try DQN recommendations
+                try:
+                    dqn_recommendations = get_dqn_recommendations(
+                        user_id=user_id,
+                        df_scaled=df_scaled,
+                        current_mood=current_mood
+                    )
+                    if dqn_recommendations:
+                        final_recommendations = dqn_recommendations
+                        source = 'dqn'
+                        logger.info("Successfully generated DQN recommendations")
+                except Exception as e:
+                    logger.error(f"Error getting DQN recommendations: {e}")
+                    # Continue with cluster recommendations
+            
+            # Start background training if enough feedback
+            if history_count >= 5:
+                logger.info("Feedback threshold reached - initiating background DQN training")
+                Thread(target=run_background_training, 
+                       args=(user_id, df_scaled, FEATURES, FEATURE_WEIGHTS)).start()
+            
+            logger.info(f"Final recommendation pool size: {len(final_recommendations)}")
+            
+            return {
+                'recommendation_pool': final_recommendations,
+                'user_songs': user_songs,
+                'has_dqn_model': model_exists,
+                'source': source
+            }
+            
+        finally:
+            session.close()
+            
     except Exception as e:
         logger.error(f"Error generating recommendation pool: {str(e)}", exc_info=True)
         raise
