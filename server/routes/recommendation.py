@@ -103,6 +103,7 @@ def refresh_recommendations():
                 pool={
                     'recommendation_pool': pool.recommendation_pool,
                     'user_songs_pool': pool.user_songs_pool,
+                    'popular_songs_pool': pool.popular_songs_pool,
                     'user_id': user_id
                 },
                 previous_recs=previous_recs,
@@ -118,6 +119,7 @@ def refresh_recommendations():
                 "recommendations": {
                     'recommendation_pool': refreshed_data['new_songs'],
                     'user_songs': refreshed_data['user_songs'],
+                    'popular_songs': refreshed_data.get('popular_songs', []),
                     'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
                     'source': refreshed_data['source']
                 },
@@ -277,33 +279,31 @@ def generate_recommendations():
             if existing_pool and existing_pool.recommendation_pool:
                 pool_age = datetime.utcnow() - existing_pool.created_at
                 logger.info(f"Found existing pool (age: {pool_age.total_seconds()/60:.1f} minutes)")
-                logger.debug(f"Existing pool user songs: {len(existing_pool.user_songs_pool)} songs")
-                logger.debug(f"Sample user songs: {existing_pool.user_songs_pool[:5]}")
+                
+                # Add debug for existing pool
+                logger.info("Found existing pool with:")
+                logger.info(f"- Regular recommendations: {len(existing_pool.recommendation_pool)}")
+                logger.info(f"- Popular songs: {len(existing_pool.popular_songs_pool) if hasattr(existing_pool, 'popular_songs_pool') else 0}")
                 
                 # Validate pool data
                 has_valid_pool = (
                     existing_pool.recommendation_pool and 
-                    len(existing_pool.recommendation_pool) > 0 and
-                    existing_pool.user_songs_pool and
-                    len(existing_pool.user_songs_pool) > 0
+                    len(existing_pool.recommendation_pool) > 0
                 )
                 
                 if has_valid_pool:
-                    logger.info(f"Using existing pool:")
-                    logger.info(f"- Recommendations: {len(existing_pool.recommendation_pool)}")
-                    logger.info(f"- User songs: {len(existing_pool.user_songs_pool)}")
-                    
                     if pool_age.total_seconds() < 1800:  # 30 minutes
+                        logger.debug("Using cached pool")
+                        source = 'cached'
                         recommendations = {
                             'recommendation_pool': existing_pool.recommendation_pool,
                             'user_songs': existing_pool.user_songs_pool,
+                            'popular_songs': existing_pool.popular_songs_pool,
                             'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
-                            'source': 'cached'
+                            'source': source
                         }
-                        source = 'cached'
                     else:
-                        # Refresh old but valid pool
-                        logger.info("Refreshing old pool")
+                        logger.debug("Refreshing old pool")
                         refreshed_pool = refresh_from_pool(
                             pool={
                                 'recommendation_pool': existing_pool.recommendation_pool,
@@ -313,47 +313,54 @@ def generate_recommendations():
                             previous_recs=existing_pool.recommendation_pool,
                             refresh_type='smart'
                         )
+                        
+                        source = 'refreshed'
                         recommendations = {
                             'recommendation_pool': refreshed_pool['new_songs'],
                             'user_songs': refreshed_pool['user_songs'],
+                            'popular_songs': refreshed_pool.get('popular_songs', []),
                             'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
-                            'source': 'refreshed'
+                            'source': source
                         }
-                        source = 'refreshed'
             
-            # Generate new recommendations if needed
+            # If no valid recommendations yet, generate new ones
             if not recommendations:
-                logger.info("Generating new recommendation pool")
-                recommendations = generate_recommendation_pool(
+                logger.debug("Generating new recommendations")
+                new_recs = generate_recommendation_pool(
                     user_id=user_id,
                     current_mood=current_mood,
                     df_scaled=df_scaled
                 )
-                source = recommendations.get('source', 'new')
                 
-                logger.debug("New recommendations generated:")
-                logger.debug(f"- Pool size: {len(recommendations.get('recommendation_pool', []))}")
-                logger.debug(f"- User songs: {len(recommendations.get('user_songs', []))}")
-                logger.debug(f"- Sample user songs: {recommendations.get('user_songs', [])[:5]}")
-                
-                if not recommendations.get('recommendation_pool'):
+                if not new_recs:
                     logger.error("Failed to generate recommendations")
                     return jsonify({"error": "Failed to generate recommendations"}), 500
                 
-                # Store the new pool
+                source = new_recs.get('source', 'new')
+                recommendations = {
+                    'recommendation_pool': new_recs['recommendation_pool'],
+                    'user_songs': new_recs['user_songs'],
+                    'popular_songs': new_recs.get('popular_songs', []),
+                    'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
+                    'source': source
+                }
+                
+                # Store new recommendations in pool
                 new_pool = RecommendationPool(
                     user_id=user_id,
-                    user_songs_pool=recommendations['user_songs'],
                     recommendation_pool=recommendations['recommendation_pool'],
+                    user_songs_pool=recommendations['user_songs'],
+                    popular_songs_pool=recommendations['popular_songs'],
                     created_at=datetime.utcnow()
                 )
                 session.add(new_pool)
                 session.commit()
-                logger.info("Stored new recommendation pool")
             
-            logger.info("\n=== Final Response ===")
-            logger.info(f"Total recommendations: {len(recommendations['recommendation_pool'])}")
-            logger.info(f"User songs: {len(recommendations['user_songs'])}")
+            # Debug final response
+            logger.info("\n=== Final Response Content ===")
+            logger.info(f"Recommendation pool size: {len(recommendations['recommendation_pool'])}")
+            logger.info(f"User songs size: {len(recommendations['user_songs'])}")
+            logger.info(f"Popular songs size: {len(recommendations.get('popular_songs', []))}")
             logger.info(f"Source: {source}")
             
             return jsonify({

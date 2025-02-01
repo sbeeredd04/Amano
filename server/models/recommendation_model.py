@@ -10,7 +10,8 @@ class RecommendationPool(Base):
     user_id = Column(Integer, nullable=False)
     recommendation_pool = Column(JSON, nullable=False)  # Store the full pool of recommendations
     user_songs_pool = Column(JSON, nullable=False)  # Store user songs pool
-    created_at = Column(DateTime, nullable=False)
+    popular_songs_pool = Column(JSON, nullable=True)  # Make sure this exists
+    created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     def serialize(self):

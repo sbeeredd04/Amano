@@ -14,7 +14,7 @@ import { faRotate } from '@fortawesome/free-solid-svg-icons';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://70bnmmdc-5000.usw3.devtunnels.ms/';
 
-const SongCard = ({ song, onLike, onDislike, feedbackStatus, onAddToPlaylist, isUserSong }) => (
+const SongCard = ({ song, onLike, onDislike, feedbackStatus, onAddToPlaylist, isUserSong, isPopular }) => (
   <div className={`bg-black/60 backdrop-blur-sm p-4 rounded-lg shadow-lg relative 
     ${isUserSong ? 'border-2 border-green-500' : 'border border-white/10'}`}>
     {isUserSong && (
@@ -181,6 +181,7 @@ export default function RecommendationPage() {
   const [userName, setUserName] = useState("");
   const [songs, setSongs] = useState([]);
   const [userSongs, setUserSongs] = useState([]);
+  const [popularSongs, setPopularSongs] = useState([]);
 
   useEffect(() => {
     const userId = sessionStorage.getItem("user_id");
@@ -296,11 +297,7 @@ export default function RecommendationPage() {
       });
 
         const data = await response.json();
-      console.debug("Received recommendations:", {
-        totalRecs: data.recommendations?.recommendation_pool?.length || 0,
-        userSongs: data.recommendations?.user_songs?.length || 0,
-        source: data.source
-      });
+      console.debug("Received recommendations:", data);
 
       if (response.ok) {
         // Also fetch full song details for user songs
@@ -321,6 +318,7 @@ export default function RecommendationPage() {
 
         setRecommendations(data.recommendations.recommendation_pool || []);
         setUserSongs(data.recommendations.user_songs || []);
+        setPopularSongs(data.recommendations.popular_songs || []);
         console.debug("Updated state with recommendations:", {
           recsCount: data.recommendations.recommendation_pool?.length || 0,
           userSongsCount: userSongIds.length
@@ -383,6 +381,7 @@ export default function RecommendationPage() {
 
         setRecommendations(data.recommendations.recommendation_pool || []);
         setUserSongs(data.recommendations.user_songs || []);
+        setPopularSongs(data.recommendations.popular_songs || []);
         console.debug("Updated state with refreshed recommendations:", {
           recsCount: data.recommendations.recommendation_pool?.length || 0,
           userSongsCount: userSongIds.length,
@@ -805,6 +804,7 @@ export default function RecommendationPage() {
         console.log("Recommendations received:", data.recommendations.length);
         setRecommendations(data.recommendations.recommendation_pool || []);
         setUserSongs(data.recommendations.user_songs || []);
+        setPopularSongs(data.recommendations.popular_songs || []);
         setFeedbackStatus({}); // Reset feedback status for new recommendations
       }
     } catch (error) {
@@ -1276,22 +1276,10 @@ export default function RecommendationPage() {
             </div>
 
             <div className="max-w-6xl mx-auto">
-              {/* New Songs Section */}
+              {/* Regular Recommendations */}
               {recommendations.length > 0 && (
                 <div className="mb-12">
-                  <div className="flex items-center gap-4 mb-6">
-                    <h3 className="text-2xl font-semibold">Recommended Songs</h3>
-                    <button
-                      onClick={handleRefreshRecommendations}
-                      className="text-gray-400 hover:text-white transition-colors"
-                      title="Refresh Recommendations"
-                    >
-                      <FontAwesomeIcon 
-                        icon={faRotate}
-                        className="w-5 h-5"
-                      />
-                    </button>
-                  </div>
+                  <h3 className="text-2xl font-semibold mb-6">Recommended Songs</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {recommendations.map((song) => (
                       <SongCard
@@ -1305,6 +1293,33 @@ export default function RecommendationPage() {
                           setIsPlaylistModalOpen(true);
                         }}
                         isUserSong={false}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Popular Songs Section */}
+              {popularSongs.length > 0 && (
+                <div className="mb-12">
+                  <h3 className="text-2xl font-semibold mb-6 flex items-center gap-2">
+                    <span>Popular Songs</span>
+                    <span className="px-2 py-1 bg-red-500 text-white text-sm rounded-full">Hot</span>
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {popularSongs.map((song) => (
+                      <SongCard
+                        key={`popular-${song.song_id}`}
+                        song={song}
+                        onLike={() => handleFeedback(song.song_id, true)}
+                        onDislike={() => handleFeedback(song.song_id, false)}
+                        feedbackStatus={feedbackStatus}
+                        onAddToPlaylist={(song) => {
+                          setSelectedSong(song);
+                          setIsPlaylistModalOpen(true);
+                        }}
+                        isUserSong={false}
+                        isPopular={true}
                       />
                     ))}
                   </div>
