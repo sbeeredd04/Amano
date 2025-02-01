@@ -3,6 +3,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from models.song_model import Song, Playlist, PlaylistSong
 from utils.db import get_session
 from flask_cors import CORS
+import logging
 
 playlists_bp = Blueprint('playlists', __name__)
 
@@ -12,6 +13,8 @@ CORS(playlists_bp,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization"],
      supports_credentials=True)
+
+logger = logging.getLogger(__name__)
 
 @playlists_bp.route('/get', methods=['GET', 'POST'])
 def get_playlists():
@@ -230,53 +233,79 @@ def delete_playlist():
 
 @playlists_bp.route('/edit', methods=['POST'])
 def edit_playlist():
-    data = request.json
-    user_id = data.get('user_id')
-    playlist_id = data.get('playlist_id')
-    name = data.get('name')
-    song_ids = data.get('song_ids', [])
-
-    if not all([user_id, playlist_id, name]):
-        return jsonify({"error": "Missing required fields"}), 400
-
-    session = get_session()
+    """Edit a playlist by adding/removing songs."""
     try:
-        playlist = session.query(Playlist).filter_by(
-            playlist_id=playlist_id, 
-            user_id=user_id
-        ).first()
-
-        if not playlist:
-            return jsonify({"error": "Playlist not found or unauthorized"}), 404
-
-        playlist.name = name
-        session.query(PlaylistSong).filter_by(playlist_id=playlist_id).delete()
+        data = request.json
+        logger.debug(f"Received edit playlist request: {data}")
         
-        for song_id in song_ids:
-            playlist_song = PlaylistSong(playlist_id=playlist_id, song_id=song_id)
-            session.add(playlist_song)
-
-        session.commit()
-
-        updated_songs = session.query(Song)\
-            .join(PlaylistSong)\
-            .filter(PlaylistSong.playlist_id == playlist_id)\
-            .all()
-
-        response_data = playlist.serialize()
-        response_data['songs'] = [{
-            'song_id': song.song_id,
-            'track_name': song.track_name,
-            'artist_name': song.artists,
-            'track_genre': song.track_genre
-        } for song in updated_songs]
-
-        return jsonify({
-            "message": "Playlist updated successfully",
-            "playlist": response_data
-        }), 200
-
+        playlist_id = data.get('playlist_id')
+        song_id = data.get('song_id')
+        action = data.get('action', 'add')  # 'add' or 'remove'
+        
+        if not all([playlist_id, song_id]):
+            logger.error("Missing required fields")
+            logger.debug(f"playlist_id: {playlist_id}, song_id: {song_id}")
+            return jsonify({"error": "Missing required fields"}), 400
+            
+        session = get_session()
+        try:
+            # Verify playlist exists
+            playlist = session.query(Playlist).filter_by(playlist_id=playlist_id).first()
+            if not playlist:
+                logger.error(f"Playlist {playlist_id} not found")
+                return jsonify({"error": "Playlist not found"}), 404
+                
+            # Verify song exists
+            song = session.query(Song).filter_by(song_id=song_id).first()
+            if not song:
+                logger.error(f"Song {song_id} not found")
+                return jsonify({"error": "Song not found"}), 404
+            
+            if action == 'add':
+                # Check if song already in playlist
+                existing = session.query(PlaylistSong)\
+                    .filter_by(playlist_id=playlist_id, song_id=song_id)\
+                    .first()
+                    
+                if existing:
+                    logger.info(f"Song {song_id} already in playlist {playlist_id}")
+                    return jsonify({"message": "Song already in playlist"}), 200
+                    
+                # Add song to playlist
+                playlist_song = PlaylistSong(playlist_id=playlist_id, song_id=song_id)
+                session.add(playlist_song)
+                logger.info(f"Added song {song_id} to playlist {playlist_id}")
+                
+            elif action == 'remove':
+                # Remove song from playlist
+                session.query(PlaylistSong)\
+                    .filter_by(playlist_id=playlist_id, song_id=song_id)\
+                    .delete()
+                logger.info(f"Removed song {song_id} from playlist {playlist_id}")
+                
+            session.commit()
+            
+            # Get updated playlist data
+            updated_playlist = playlist.serialize()
+            updated_songs = session.query(Song)\
+                .join(PlaylistSong)\
+                .filter(PlaylistSong.playlist_id == playlist_id)\
+                .all()
+            updated_playlist['songs'] = [song.serialize() for song in updated_songs]
+            
+            logger.debug(f"Updated playlist now has {len(updated_playlist['songs'])} songs")
+            return jsonify({
+                "message": f"Successfully {action}ed song",
+                "playlist": updated_playlist
+            }), 200
+        
+        except Exception as e:
+            logger.error(f"Error editing playlist: {str(e)}", exc_info=True)
+            session.rollback()
+            return jsonify({"error": str(e)}), 500
+            
     except Exception as e:
+        logger.error(f"Error editing playlist: {str(e)}", exc_info=True)
         session.rollback()
         return jsonify({"error": str(e)}), 500
     finally:

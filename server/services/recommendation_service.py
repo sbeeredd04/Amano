@@ -196,7 +196,7 @@ def background_train_dqn(user_id, df_scaled, features, feature_weights):
         
         # Get candidate songs using clustering
         cluster_recommendations = get_cluster_weighted_recommendations(
-                            user_songs=user_songs,
+            user_songs=user_songs,
             df_scaled=df_scaled,
             n_recommendations=400  # Larger pool for training
         )

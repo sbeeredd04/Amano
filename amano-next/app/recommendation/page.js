@@ -295,7 +295,7 @@ export default function RecommendationPage() {
         })
       });
 
-      const data = await response.json();
+        const data = await response.json();
       console.debug("Received recommendations:", {
         totalRecs: data.recommendations?.recommendation_pool?.length || 0,
         userSongs: data.recommendations?.user_songs?.length || 0,
@@ -329,11 +329,11 @@ export default function RecommendationPage() {
       } else {
         throw new Error(data.error || 'Failed to get recommendations');
       }
-    } catch (error) {
+      } catch (error) {
       console.error("Error getting recommendations:", error);
-      setMessage(`Error: ${error.message}`);
-    }
-  };
+        setMessage(`Error: ${error.message}`);
+      }
+    };
 
   const handleRefreshRecommendations = async () => {
     try {
@@ -840,27 +840,49 @@ export default function RecommendationPage() {
 
   const handleAddToExistingPlaylist = async (playlistId) => {
     try {
-      const userId = sessionStorage.getItem("user_id");
+      console.debug("Adding song to playlist:", {
+        playlistId,
+        songId: selectedSong?.song_id
+      });
+
+      if (!selectedSong?.song_id || !playlistId) {
+        console.error("Missing required data:", { 
+          songId: selectedSong?.song_id, 
+          playlistId 
+        });
+        setMessage("Error: Missing song or playlist information");
+        return;
+      }
+
       const response = await fetch(`${API_URL}/playlists/edit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          user_id: userId,
           playlist_id: playlistId,
-          song_ids: [selectedSong.song_id]
+          song_id: selectedSong.song_id,
+          action: 'add'  // Explicitly specify the action
         })
       });
 
+      const data = await response.json();
+      console.debug("Server response:", data);
+
       if (response.ok) {
-        setMessage("Song added to playlist successfully!");
+        // Update the playlists state with the updated playlist
+        setPlaylists(prevPlaylists => 
+          prevPlaylists.map(playlist => 
+            playlist.playlist_id === playlistId ? data.playlist : playlist
+          )
+        );
+        setMessage(data.message || "Song added to playlist successfully!");
       } else {
-        setMessage("Failed to add song to playlist");
+        throw new Error(data.error || 'Failed to add song to playlist');
       }
     } catch (error) {
-      console.error("Error adding to playlist:", error);
-      setMessage("Error adding song to playlist");
+      console.error("Error adding song to playlist:", error);
+      setMessage(`Error: ${error.message}`);
     } finally {
       setIsPlaylistModalOpen(false);
       setSelectedSong(null);
@@ -912,39 +934,36 @@ export default function RecommendationPage() {
   // Add this function to handle song removal
   const handleRemoveSong = async (playlistId, songId) => {
     try {
-      const userId = sessionStorage.getItem("user_id");
-      const response = await fetch(`${API_URL}/playlists/remove_song`, {
+      console.debug("Removing song from playlist:", { playlistId, songId });
+
+      const response = await fetch(`${API_URL}/playlists/edit`, {
         method: 'POST',
-        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          user_id: userId,
           playlist_id: playlistId,
-          song_id: songId
-        }),
+          song_id: songId,
+          action: 'remove'
+        })
       });
 
+      const data = await response.json();
+      console.debug("Server response:", data);
+
       if (response.ok) {
-        // Update the playlists state to reflect the change
-        setPlaylists(playlists.map(playlist => {
-          if (playlist.playlist_id === playlistId) {
-            return {
-              ...playlist,
-              songs: playlist.songs.filter(song => song.song_id !== songId)
-            };
-          }
-          return playlist;
-        }));
+        setPlaylists(prevPlaylists => 
+          prevPlaylists.map(playlist => 
+            playlist.playlist_id === playlistId ? data.playlist : playlist
+          )
+        );
         setMessage("Song removed from playlist");
       } else {
-        const data = await response.json();
-        setMessage(data.error || "Failed to remove song");
+        throw new Error(data.error || 'Failed to remove song from playlist');
       }
     } catch (error) {
       console.error("Error removing song:", error);
-      setMessage("Error removing song from playlist");
+      setMessage(`Error: ${error.message}`);
     }
   };
 
@@ -1307,7 +1326,7 @@ export default function RecommendationPage() {
                       };
                       
                       return (
-                        <SongCard
+                      <SongCard
                           key={`user-song-${songId}`}
                           song={{
                             song_id: songId,
@@ -1317,13 +1336,13 @@ export default function RecommendationPage() {
                           }}
                           onLike={() => handleFeedback(songId, true)}
                           onDislike={() => handleFeedback(songId, false)}
-                          feedbackStatus={feedbackStatus}
-                          onAddToPlaylist={(song) => {
-                            setSelectedSong(song);
-                            setIsPlaylistModalOpen(true);
-                          }}
-                          isUserSong={true}
-                        />
+                        feedbackStatus={feedbackStatus}
+                        onAddToPlaylist={(song) => {
+                          setSelectedSong(song);
+                          setIsPlaylistModalOpen(true);
+                        }}
+                        isUserSong={true}
+                      />
                       );
                     })}
                   </div>
