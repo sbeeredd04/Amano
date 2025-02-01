@@ -12,7 +12,7 @@ from utils.db import get_dataset
 import pandas as pd
 import os
 from utils.db import get_session
-from models.song_model import UserMood, UserHistory, Base
+from models.song_model import UserMood, UserHistory, Base, Playlist, PlaylistSong
 import logging
 from flask_cors import CORS
 from datetime import datetime
@@ -270,7 +270,13 @@ def generate_recommendations():
             
         session = get_session()
         try:
-            # Check for existing recommendation pool
+            # Debug user's playlists first
+            playlists = session.query(Playlist).filter_by(user_id=user_id).all()
+            logger.debug(f"Found {len(playlists)} playlists for user {user_id}")
+            for playlist in playlists:
+                song_count = session.query(PlaylistSong).filter_by(playlist_id=playlist.playlist_id).count()
+                logger.debug(f"Playlist {playlist.name}: {song_count} songs")
+            
             existing_pool = session.query(RecommendationPool)\
                 .filter_by(user_id=user_id)\
                 .order_by(RecommendationPool.created_at.desc())\
@@ -282,15 +288,22 @@ def generate_recommendations():
             if existing_pool and existing_pool.recommendation_pool:
                 pool_age = datetime.utcnow() - existing_pool.created_at
                 logger.info(f"Found existing pool (age: {pool_age.total_seconds()/60:.1f} minutes)")
+                logger.debug(f"Existing pool user songs: {len(existing_pool.user_songs_pool)} songs")
+                logger.debug(f"Sample user songs: {existing_pool.user_songs_pool[:5]}")
                 
                 # Validate pool data
                 has_valid_pool = (
                     existing_pool.recommendation_pool and 
-                    len(existing_pool.recommendation_pool) > 0
+                    len(existing_pool.recommendation_pool) > 0 and
+                    existing_pool.user_songs_pool and
+                    len(existing_pool.user_songs_pool) > 0
                 )
                 
                 if has_valid_pool:
-                    logger.info(f"Using existing pool with {len(existing_pool.recommendation_pool)} recommendations")
+                    logger.info(f"Using existing pool:")
+                    logger.info(f"- Recommendations: {len(existing_pool.recommendation_pool)}")
+                    logger.info(f"- User songs: {len(existing_pool.user_songs_pool)}")
+                    
                     if pool_age.total_seconds() < 1800:  # 30 minutes
                         recommendations = {
                             'recommendation_pool': existing_pool.recommendation_pool,
@@ -329,6 +342,11 @@ def generate_recommendations():
                 )
                 source = recommendations.get('source', 'new')
                 
+                logger.debug("New recommendations generated:")
+                logger.debug(f"- Pool size: {len(recommendations.get('recommendation_pool', []))}")
+                logger.debug(f"- User songs: {len(recommendations.get('user_songs', []))}")
+                logger.debug(f"- Sample user songs: {recommendations.get('user_songs', [])[:5]}")
+                
                 if not recommendations.get('recommendation_pool'):
                     logger.error("Failed to generate recommendations")
                     return jsonify({"error": "Failed to generate recommendations"}), 500
@@ -344,7 +362,9 @@ def generate_recommendations():
                 session.commit()
                 logger.info("Stored new recommendation pool")
             
-            logger.info(f"Returning {len(recommendations['recommendation_pool'])} recommendations")
+            logger.info("\n=== Final Response ===")
+            logger.info(f"Total recommendations: {len(recommendations['recommendation_pool'])}")
+            logger.info(f"User songs: {len(recommendations['user_songs'])}")
             logger.info(f"Source: {source}")
             
             return jsonify({

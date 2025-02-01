@@ -93,8 +93,20 @@ def add_playlist():
 
 @playlists_bp.route('/songs', methods=['GET'])
 def get_songs():
-    session = get_session()
     try:
+        song_ids = request.args.get('ids')
+        if song_ids:
+            song_ids = [int(id) for id in song_ids.split(',')]
+            session = get_session()
+            songs = session.query(Song).filter(Song.song_id.in_(song_ids)).all()
+            return jsonify({
+                "songs": [{
+                    'song_id': song.song_id,
+                    'track_name': song.track_name,
+                    'artist_name': song.artists,
+                    'track_genre': song.track_genre
+                } for song in songs]
+            }), 200
         genre = request.args.get('genre', '').strip()
         search = request.args.get('search', '').strip()
         search_type = request.args.get('type', 'track')
@@ -106,7 +118,7 @@ def get_songs():
             limit = 20
             offset = 0
 
-        query = session.query(Song)
+        query = get_session().query(Song)
 
         if genre and genre.lower() != 'all':
             query = query.filter(Song.track_genre.ilike(f"%{genre}%"))
@@ -140,8 +152,6 @@ def get_songs():
             "songs": [],
             "total_count": 0
         }), 500
-    finally:
-        session.close()
 
 @playlists_bp.route('/user_songs', methods=['POST'])
 def get_user_songs():

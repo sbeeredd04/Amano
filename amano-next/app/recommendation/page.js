@@ -180,6 +180,7 @@ export default function RecommendationPage() {
   const [activeItem, setActiveItem] = useState(null);
   const [userName, setUserName] = useState("");
   const [songs, setSongs] = useState([]);
+  const [userSongs, setUserSongs] = useState([]);
 
   useEffect(() => {
     const userId = sessionStorage.getItem("user_id");
@@ -242,6 +243,7 @@ export default function RecommendationPage() {
     const fetchData = async () => {
       try {
         // Only fetch playlists and mood
+        console.log("Fetching initial data...");
         await Promise.all([
           fetchPlaylists(),
           fetchMood()
@@ -250,7 +252,10 @@ export default function RecommendationPage() {
         // Log initial state
         console.debug("Initial data loaded");
         console.debug(`Current mood: ${currentMood}`);
-        console.debug(`Use user songs: ${useUserSongs}`);
+        console.debug(`User songs count: ${userSongs?.length || 0}`);
+        if (userSongs?.length > 0) {
+          console.debug("Sample user songs:", userSongs.slice(0, 5));
+        }
         
       } catch (error) {
         console.error("Error fetching initial data:", error);
@@ -272,6 +277,11 @@ export default function RecommendationPage() {
   const handleInitialRecommendations = async () => {
     try {
       setMessage("Getting recommendations...");
+      console.debug("Requesting recommendations with params:", {
+        userId,
+        currentMood,
+        useUserSongs
+      });
       
       const response = await fetch(`${API_URL}/recommendation/recs`, {
         method: 'POST',
@@ -281,16 +291,39 @@ export default function RecommendationPage() {
         body: JSON.stringify({
           user_id: userId,
           mood: currentMood,
-        }),
+          use_user_songs: useUserSongs
+        })
       });
 
       const data = await response.json();
+      console.debug("Received recommendations:", {
+        totalRecs: data.recommendations?.recommendation_pool?.length || 0,
+        userSongs: data.recommendations?.user_songs?.length || 0,
+        source: data.source
+      });
+
       if (response.ok) {
-        setRecommendations({
-          new_songs: data.recommendations?.recommendation_pool || [],
-          user_songs: data.recommendations?.user_songs || [],
-          has_dqn_model: data.recommendations?.has_dqn_model || false,
-          source: data.recommendations?.source || 'clustering'
+        // Also fetch full song details for user songs
+        const userSongIds = data.recommendations.user_songs || [];
+        console.debug("Fetching details for user songs:", userSongIds);
+        
+        // Fetch song details if not already in songs array
+        const missingSongs = userSongIds.filter(id => !songs.find(s => s.song_id === id));
+        if (missingSongs.length > 0) {
+          const songDetailsResponse = await fetch(
+            `${API_URL}/playlists/songs?ids=${missingSongs.join(',')}`
+          );
+          if (songDetailsResponse.ok) {
+            const songDetails = await songDetailsResponse.json();
+            setSongs(prevSongs => [...prevSongs, ...songDetails.songs]);
+          }
+        }
+
+        setRecommendations(data.recommendations.recommendation_pool || []);
+        setUserSongs(data.recommendations.user_songs || []);
+        console.debug("Updated state with recommendations:", {
+          recsCount: data.recommendations.recommendation_pool?.length || 0,
+          userSongsCount: userSongIds.length
         });
         setMessage("");
       } else {
@@ -305,6 +338,11 @@ export default function RecommendationPage() {
   const handleRefreshRecommendations = async () => {
     try {
       setMessage("Refreshing recommendations...");
+      console.debug("Requesting refresh with params:", {
+        userId,
+        currentMood,
+        previousRecs: recommendations.length
+      });
       
       const response = await fetch(`${API_URL}/recommendation/refresh`, {
         method: 'POST',
@@ -314,25 +352,32 @@ export default function RecommendationPage() {
         body: JSON.stringify({
           user_id: userId,
           mood: currentMood,
-          use_user_songs: useUserSongs,
-          previous_recommendations: recommendations.new_songs || [],
+          previous_recommendations: recommendations,
           refresh_type: 'smart'
-        }),
+        })
       });
 
       const data = await response.json();
+      console.debug("Received refreshed recommendations:", {
+        totalRecs: data.recommendations?.new_songs?.length || 0,
+        userSongs: data.recommendations?.user_songs?.length || 0,
+        source: data.source
+      });
+
       if (response.ok) {
-        setRecommendations({
-          new_songs: data.recommendations.new_songs,
-          user_songs: data.recommendations.user_songs
+        setRecommendations(data.recommendations.new_songs || []);
+        setUserSongs(data.recommendations.user_songs || []);
+        console.debug("Updated state with refreshed recommendations:", {
+          recsCount: data.recommendations.new_songs?.length || 0,
+          userSongsCount: data.recommendations.user_songs?.length || 0
         });
-        setMessage(`Refreshed recommendations using ${data.source}`);
+        setMessage("");
       } else {
-        setMessage(`Error: ${data.error}`);
+        throw new Error(data.error || 'Failed to refresh recommendations');
       }
     } catch (error) {
-      setMessage("Error refreshing recommendations");
-      console.error(error);
+      console.error("Error refreshing recommendations:", error);
+      setMessage(`Error: ${error.message}`);
     }
   };
 
@@ -741,7 +786,8 @@ export default function RecommendationPage() {
       if (response.ok) {
         const data = await response.json();
         console.log("Recommendations received:", data.recommendations.length);
-        setRecommendations(data.recommendations);
+        setRecommendations(data.recommendations.recommendation_pool || []);
+        setUserSongs(data.recommendations.user_songs || []);
         setFeedbackStatus({}); // Reset feedback status for new recommendations
       }
     } catch (error) {
@@ -1195,7 +1241,7 @@ export default function RecommendationPage() {
 
             <div className="max-w-6xl mx-auto">
               {/* New Songs Section */}
-              {recommendations.new_songs?.length > 0 && (
+              {recommendations.length > 0 && (
                 <div className="mb-12">
                   <div className="flex items-center gap-4 mb-6">
                     <h3 className="text-2xl font-semibold">Recommended Songs</h3>
@@ -1211,7 +1257,7 @@ export default function RecommendationPage() {
                     </button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {recommendations.new_songs.map((song) => (
+                    {recommendations.map((song) => (
                       <SongCard
                         key={song.song_id}
                         song={song}
@@ -1230,24 +1276,39 @@ export default function RecommendationPage() {
               )}
 
               {/* User Songs Section */}
-              {recommendations.user_songs?.length > 0 && (
+              {userSongs.length > 0 && (
                 <div>
                   <h3 className="text-2xl font-semibold mb-6">From Your Playlists</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {recommendations.user_songs.map((song) => (
-                      <SongCard
-                        key={song.song_id}
-                        song={song}
-                        onLike={() => handleFeedback(song.song_id, true)}
-                        onDislike={() => handleFeedback(song.song_id, false)}
-                        feedbackStatus={feedbackStatus}
-                        onAddToPlaylist={(song) => {
-                          setSelectedSong(song);
-                          setIsPlaylistModalOpen(true);
-                        }}
-                        isUserSong={true}
-                      />
-                    ))}
+                    {userSongs.map((songId) => {
+                      // Find the full song details from the songs array
+                      const songDetails = songs.find(s => s.song_id === songId) || {
+                        song_id: songId,
+                        track_name: "Loading...",
+                        artist_name: "Loading...",
+                        track_genre: ""
+                      };
+                      
+                      return (
+                        <SongCard
+                          key={`user-song-${songId}`}
+                          song={{
+                            song_id: songId,
+                            track_name: songDetails.track_name,
+                            artist_name: songDetails.artist_name,
+                            track_genre: songDetails.track_genre
+                          }}
+                          onLike={() => handleFeedback(songId, true)}
+                          onDislike={() => handleFeedback(songId, false)}
+                          feedbackStatus={feedbackStatus}
+                          onAddToPlaylist={(song) => {
+                            setSelectedSong(song);
+                            setIsPlaylistModalOpen(true);
+                          }}
+                          isUserSong={true}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
               )}
