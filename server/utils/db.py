@@ -17,9 +17,16 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 # Scoped session for thread safety
 Session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
 
+# Get the current directory
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
+
 # Dataset paths
-RAW_DATA_PATH = "/Users/sriujjwalreddyb/Amano/spotify_Song_Dataset/dataset.csv"
-PREPROCESSED_DATA_PATH = "/Users/sriujjwalreddyb/Amano/spotify_Song_Dataset/final_dataset.csv"
+RAW_DATA_PATH = os.path.join(PROJECT_ROOT, "spotify_Song_Dataset", "dataset.csv")
+PREPROCESSED_DATA_PATH = os.path.join(PROJECT_ROOT, "spotify_Song_Dataset", "final_dataset.csv")
+
+# Ensure the spotify_Song_Dataset directory exists
+os.makedirs(os.path.join(PROJECT_ROOT, "spotify_Song_Dataset"), exist_ok=True)
 
 # Global DataFrame instance
 _df_scaled = None
@@ -76,18 +83,26 @@ def init_db():
         # Create all tables first
         Base.metadata.create_all(engine)
 
-        # Add table schema logging
-        inspector = inspect(engine)
-        columns = inspector.get_columns('songs')
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(PREPROCESSED_DATA_PATH), exist_ok=True)
+        
+        # Check if preprocessed file exists, if not create it
+        if not os.path.exists(PREPROCESSED_DATA_PATH):
+            logger.info("Preprocessed dataset not found. Starting preprocessing...")
+            df_scaled = preprocess_dataset()
+        else:
+            logger.info("Loading existing preprocessed dataset...")
+            df_scaled = pd.read_csv(PREPROCESSED_DATA_PATH)
 
         session = get_session()
         try:
             song_count = session.query(Song).count()
             
             if song_count == 0:
+                logger.info("No songs in database. Starting import...")
                 # Read first few rows of dataset to verify structure
                 df_sample = pd.read_csv(PREPROCESSED_DATA_PATH, nrows=5)
-
+                
                 # Import data in chunks
                 import_songs_from_csv(session)
                     
@@ -95,6 +110,7 @@ def init_db():
             session.close()
 
     except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}", exc_info=True)
         raise
 
 def import_songs_from_csv(session):
