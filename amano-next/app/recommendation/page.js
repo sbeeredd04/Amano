@@ -154,6 +154,16 @@ const PlaylistModal = ({ isOpen, onClose, onSubmit, playlists, onCreateNew }) =>
   );
 };
 
+// Add this loading component near the top with other components
+const LoadingOverlay = ({ message }) => (
+  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="bg-black/60 border border-white/10 p-8 rounded-lg flex flex-col items-center">
+      <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-green-500 mb-4"></div>
+      <p className="text-lg text-white">{message}</p>
+    </div>
+  </div>
+);
+
 export default function RecommendationPage() {
   const router = useRouter();
   const [playlists, setPlaylists] = useState([]);
@@ -192,6 +202,7 @@ export default function RecommendationPage() {
   const [popularSongs, setPopularSongs] = useState([]);
   const [clusterVisualization, setClusterVisualization] = useState(null);
   const [clusterStats, setClusterStats] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     const userId = sessionStorage.getItem("user_id");
@@ -287,7 +298,8 @@ export default function RecommendationPage() {
 
   const handleInitialRecommendations = async () => {
     try {
-      setMessage("Getting recommendations...");
+      setIsGenerating(true); // Start loading
+      setMessage("Generating recommendations...");
       console.debug("Requesting recommendations with params:", {
         userId,
         currentMood,
@@ -306,7 +318,7 @@ export default function RecommendationPage() {
         })
       });
 
-        const data = await response.json();
+      const data = await response.json();
       console.debug("Received recommendations:", data);
 
       if (response.ok) {
@@ -333,15 +345,17 @@ export default function RecommendationPage() {
           recsCount: data.recommendations.recommendation_pool?.length || 0,
           userSongsCount: userSongIds.length
         });
-        setMessage("");
+        setMessage("Recommendations generated successfully!");
       } else {
         throw new Error(data.error || 'Failed to get recommendations');
       }
-      } catch (error) {
+    } catch (error) {
       console.error("Error getting recommendations:", error);
-        setMessage(`Error: ${error.message}`);
-      }
-    };
+      setMessage(`Error: ${error.message}`);
+    } finally {
+      setIsGenerating(false); // Stop loading
+    }
+  };
 
   const handleRefreshRecommendations = async () => {
     try {
@@ -1500,6 +1514,11 @@ export default function RecommendationPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Add loading overlay */}
+      {isGenerating && (
+        <LoadingOverlay message="Generating recommendations... This may take a moment." />
       )}
     </div>
   );

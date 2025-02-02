@@ -5,6 +5,10 @@ import os
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
+from scipy import stats
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Database setup
 DATABASE_URL = 'sqlite:///songs.db'
@@ -13,11 +17,55 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 # Scoped session for thread safety
 Session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
 
-# Preprocessed dataset path
+# Dataset paths
+RAW_DATA_PATH = "/Users/sriujjwalreddyb/Amano/spotify_Song_Dataset/dataset.csv"
 PREPROCESSED_DATA_PATH = "/Users/sriujjwalreddyb/Amano/spotify_Song_Dataset/final_dataset.csv"
 
 # Global DataFrame instance
 _df_scaled = None
+
+def preprocess_dataset():
+    """Preprocess the raw dataset and save the cleaned version."""
+    try:
+        logger.info("Starting dataset preprocessing...")
+        
+        # Load and preprocess data
+        df = pd.read_csv(RAW_DATA_PATH)
+        logger.info(f"Loaded raw dataset with {len(df)} records")
+        
+        # Data preprocessing steps
+        df = df.dropna()
+        df = df.drop(['duration_ms', 'explicit', 'mode', 'liveness', 'loudness', 'time_signature', 'key'], axis=1)
+        df.rename(columns={'Unnamed: 0': 'song_id'}, inplace=True)
+        
+        # Scale features
+        features_to_scale = ['popularity', 'danceability', 'energy', 'acousticness', 'valence', 'tempo', 'speechiness', 'instrumentalness']
+        scaler = MinMaxScaler()
+        scaled_features = scaler.fit_transform(df[features_to_scale])
+        df_scaled = pd.DataFrame(scaled_features, columns=features_to_scale)
+        
+        # Add back metadata
+        df_scaled['song_id'] = df['song_id']
+        df_scaled['track_id'] = df['track_id']
+        df_scaled['artist_name'] = df['artists'].fillna('')
+        df_scaled['track_name'] = df['track_name']
+        df_scaled['album_name'] = df['album_name'].fillna('')
+        df_scaled['track_genre'] = df['track_genre'].fillna('')
+        
+        # Clean up and reorder
+        df_scaled = df_scaled.dropna()
+        df_scaled = df_scaled[['song_id', 'track_id', 'artist_name', 'track_name', 'album_name', 'track_genre'] + features_to_scale]
+        df_scaled = df_scaled.drop_duplicates()
+        
+        # Save preprocessed dataset
+        df_scaled.to_csv(PREPROCESSED_DATA_PATH, index=False)
+        logger.info(f"Saved preprocessed dataset with {len(df_scaled)} records")
+        
+        return df_scaled
+        
+    except Exception as e:
+        logger.error(f"Error preprocessing dataset: {str(e)}", exc_info=True)
+        raise
 
 def get_session():
     return Session()

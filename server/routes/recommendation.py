@@ -418,8 +418,8 @@ def visualize_clusters():
         
         # Generate clusters and visualization
         X = StandardScaler().fit_transform(user_songs_df[features])
-        eps = 6  # DBSCAN eps parameter
-        dbscan = DBSCAN(eps=eps, min_samples=1)
+        eps = 2 # DBSCAN eps parameter
+        dbscan = DBSCAN(eps=eps, min_samples=2)
         clusters = dbscan.fit_predict(X)
         
         # Reduce dimensions for visualization
