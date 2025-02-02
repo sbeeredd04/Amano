@@ -56,7 +56,7 @@ class UserHistory(Base):
 
     user_id = Column(Integer, primary_key=True)
     song_id = Column(Integer, primary_key=True)  # Song ID
-    mood = Column(String(20))  # Stores the mood as a string instead of a binary object
+    mood = Column(String(20), primary_key=True)  # Stores the mood as a string instead of a binary object
     reward = Column(Integer)  # Stores the reward: 1 for liked, -1 for disliked, 0 for neutral
 
     def __repr__(self):
