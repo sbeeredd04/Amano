@@ -624,7 +624,7 @@ def get_popular_recommendations(user_id, genres=None, mood=None, limit=10, exclu
         
         # Perform clustering on user songs
         X = StandardScaler().fit_transform(user_songs_df[FEATURES].values)
-        dbscan = DBSCAN(eps=6, min_samples=1)
+        dbscan = DBSCAN(eps=2, min_samples=2)  # Adjusted parameters
         clusters = dbscan.fit_predict(X)
         
         # Count songs in each cluster
