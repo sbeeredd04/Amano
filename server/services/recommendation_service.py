@@ -840,25 +840,23 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
         # Get the pools
         recommendation_pool = pool['recommendation_pool']
         user_songs_pool = pool['user_songs_pool']
-        popular_songs_pool = pool.get('popular_songs', [])  # Get popular songs if available
         
         if refresh_type == 'smart':
-            # Define ratios for different types of recommendations
-            keep_ratio = 0.3  # Keep 30% of previous recommendations
-            popular_ratio = 0.7  # 70% popular songs from pool
+            # Updated ratios
+            keep_ratio = 0.1  # Keep only 10% of previous recommendations
+            popular_ratio = 0.9  # 90% new recommendations
             
-            total_new_recs = 40  # Increased from 20 to 40 for base recommendations
+            total_new_recs = 40  # Base number of recommendations
             
-            # Calculate counts for each category
+            # Calculate counts
             n_keep = int(total_new_recs * keep_ratio)
             n_popular = int(total_new_recs * popular_ratio)
             
-            logger.info(f"Distribution - Keep: {n_keep}, Popular: {n_popular}")
+            logger.info(f"Distribution - Keep: {n_keep}, New Popular: {n_popular}")
             
-            # Keep best previous recommendations
+            # Keep best previous recommendations (10%)
             kept_recs = []
             if previous_recs:
-                # Sort by similarity and popularity
                 sorted_prev = sorted(
                     previous_recs,
                     key=lambda x: (x.get('similarity', 0) * 0.8 + x.get('popularity', 0) * 0.2),
@@ -866,20 +864,31 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
                 )
                 kept_recs = sorted_prev[:n_keep]
             
-            # Get popular recommendations from pool
+            # Get pool of songs excluding kept recommendations
             kept_ids = [rec['song_id'] for rec in kept_recs]
             available_pool = [rec for rec in recommendation_pool if rec['song_id'] not in kept_ids]
             
-            # Sort pool by popularity and similarity
-            popular_pool = sorted(
+            # Sort available pool by popularity and similarity
+            sorted_pool = sorted(
                 available_pool,
                 key=lambda x: (x.get('popularity', 0) * 0.2 + x.get('similarity', 0) * 0.8),
                 reverse=True
             )
-            popular_recs = popular_pool[:n_popular]
             
-            # Get novel recommendations (lower similarity/popularity for discovery)
-            used_ids = kept_ids + [rec['song_id'] for rec in popular_recs]
+            # Implement randomness for popular song selection
+            # Take top 60% of sorted pool as candidates for random selection
+            candidate_pool_size = int(len(sorted_pool) * 0.6)  # Consider top 60% of songs
+            candidate_pool = sorted_pool[:candidate_pool_size]
+            
+            # Randomly select from candidate pool with 40% randomness
+            popular_recs = []
+            while len(popular_recs) < n_popular and candidate_pool:
+                if random.random() < 0.4:  # 40% chance of random selection
+                    selected_idx = random.randint(0, len(candidate_pool) - 1)
+                else:
+                    selected_idx = 0  # Take from top
+                
+                popular_recs.append(candidate_pool.pop(selected_idx))
             
             # Get additional popular recommendations
             try:
@@ -889,10 +898,9 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
                         user_id=user_id,
                         genres=None,
                         mood=None,
-                        limit=30,     # Increased from 15 to 30
+                        limit=30,
                         exclude_songs=kept_recs + popular_recs
                     )
-                    
                 else:
                     extra_popular = []
                     logger.warning("No user_id in pool, skipping extra recommendations")
@@ -900,39 +908,48 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
                 logger.error(f"Error getting extra recommendations: {e}")
                 extra_popular = []
             
-            # Combine all recommendations
+            # Combine recommendations
             new_recommendations = kept_recs + popular_recs
-            additional_popular = extra_popular
             
-            # Always include user playlist songs (increased to 30)
+            # Include user playlist songs
             if user_songs_pool:
                 user_recs = random.sample(user_songs_pool, min(30, len(user_songs_pool)))
             else:
                 user_recs = []
             
             logger.info(f"Generated recommendations:")
-            logger.info(f"- Kept: {len(kept_recs)}")
-            logger.info(f"- Popular from pool: {len(popular_recs)}")
+            logger.info(f"- Kept from previous: {len(kept_recs)}")
+            logger.info(f"- New popular (with randomness): {len(popular_recs)}")
             logger.info(f"- Extra popular: {len(extra_popular)}")
             logger.info(f"- User playlist songs: {len(user_recs)}")
-            
-            # Debug popular songs
-            logger.info(f"Extra popular songs generated: {len(extra_popular)}")
-            if extra_popular:
-                logger.debug(f"Sample extra popular song: {extra_popular[0]}")
             
             return {
                 'new_songs': new_recommendations,
                 'user_songs': user_recs,
-                'popular_songs': additional_popular,
+                'popular_songs': extra_popular,
                 'source': 'smart_pool_refresh'
             }
             
         else:
-            # Simple refresh - get random selections plus extra popular
-            new_recs = random.sample(recommendation_pool, min(40, len(recommendation_pool)))  # Increased from 20 to 40
+            # Simple refresh with similar randomness concept
+            available_pool = sorted(
+                recommendation_pool,
+                key=lambda x: (x.get('popularity', 0) * 0.2 + x.get('similarity', 0) * 0.8),
+                reverse=True
+            )
             
-            # Add popular and novel recommendations for simple refresh
+            candidate_pool_size = int(len(available_pool) * 0.6)
+            candidate_pool = available_pool[:candidate_pool_size]
+            
+            new_recs = []
+            while len(new_recs) < 40 and candidate_pool:  # Get 40 recommendations
+                if random.random() < 0.4:  # 40% chance of random selection
+                    selected_idx = random.randint(0, len(candidate_pool) - 1)
+                else:
+                    selected_idx = 0
+                new_recs.append(candidate_pool.pop(selected_idx))
+            
+            # Add extra popular recommendations
             try:
                 user_id = pool.get('user_id')
                 if user_id:
@@ -940,19 +957,18 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
                         user_id=user_id,
                         genres=None,
                         mood=None,
-                        limit=30,     # Increased from 20 to 30
+                        limit=30,
                         exclude_songs=new_recs
                     )
-                    new_recs.extend(extra_popular)
-                    random.shuffle(new_recs)
+                    
             except Exception as e:
                 logger.error(f"Error getting extra popular recommendations: {e}")
+                extra_popular = []
             
-            # Always include random user playlist songs (increased to 30)
+            # Include random user playlist songs
             if user_songs_pool:
                 user_recs = random.sample(user_songs_pool, min(30, len(user_songs_pool)))
             else:
-                logger.warning("No user songs in pool")
                 user_recs = []
             
             return {
