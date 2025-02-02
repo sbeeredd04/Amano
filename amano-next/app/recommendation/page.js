@@ -11,6 +11,7 @@ import { faHeart as farHeart } from '@fortawesome/free-regular-svg-icons';
 import { faThumbsDown as fasThumbsDown } from '@fortawesome/free-solid-svg-icons';
 import { faThumbsDown as farThumbsDown } from '@fortawesome/free-regular-svg-icons';
 import { faRotate } from '@fortawesome/free-solid-svg-icons';
+import { faProjectDiagram } from '@fortawesome/free-solid-svg-icons';
 import Image from 'next/image';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://70bnmmdc-5000.usw3.devtunnels.ms/';
@@ -203,6 +204,8 @@ export default function RecommendationPage() {
   const [clusterVisualization, setClusterVisualization] = useState(null);
   const [clusterStats, setClusterStats] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [showVisualization, setShowVisualization] = useState(false);
+  const [isVisualizing, setIsVisualizing] = useState(false);
 
   useEffect(() => {
     const userId = sessionStorage.getItem("user_id");
@@ -854,14 +857,17 @@ export default function RecommendationPage() {
         </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-        {recommendations.map((song) => (
+        {recommendations.map((song, index) => (
           <SongCard
-            key={song.song_id}
+            key={`rec-${song.song_id}-${index}`}
             song={song}
             onLike={() => handleFeedback(song.song_id, true)}
             onDislike={() => handleFeedback(song.song_id, false)}
             feedbackStatus={feedbackStatus}
-            onAddToPlaylist={handleAddToPlaylist}
+            onAddToPlaylist={(song) => {
+              setSelectedSong(song);
+              setIsPlaylistModalOpen(true);
+            }}
             isUserSong={false}
           />
         ))}
@@ -874,9 +880,9 @@ export default function RecommendationPage() {
     <div className="space-y-6">
       <h3 className="text-2xl font-semibold mb-8">Popular Now</h3>
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-        {popularSongs.map((song) => (
+        {popularSongs.map((song, index) => (
           <SongCard
-            key={song.song_id}
+            key={`popular-${song.song_id}-${index}`}
             song={song}
             onLike={() => handleFeedback(song.song_id, true)}
             onDislike={() => handleFeedback(song.song_id, false)}
@@ -1043,8 +1049,9 @@ export default function RecommendationPage() {
     }
   };
 
-  const fetchClusterVisualization = async () => {
+  const handleVisualize = async () => {
     try {
+      setIsVisualizing(true);
       const userId = sessionStorage.getItem("user_id");
       if (!userId) return;
 
@@ -1061,23 +1068,23 @@ export default function RecommendationPage() {
 
       const data = await response.json();
       if (response.ok) {
-        setClusterVisualization(data.plot);
-        setClusterStats(data);
-        setMessage("");
+        setClusterVisualization(data.visualization);
+        setClusterStats(data.stats);
+        setShowVisualization(true);
       } else {
-        throw new Error(data.error || 'Failed to generate visualization');
+        if (data.error === "No user songs found") {
+          setMessage("Please create a playlist and add some songs first to visualize your music clusters!");
+        } else {
+          throw new Error(data.error || 'Failed to generate visualization');
+        }
       }
     } catch (error) {
       console.error("Error generating visualization:", error);
       setMessage(`Error: ${error.message}`);
+    } finally {
+      setIsVisualizing(false);
     }
   };
-
-  useEffect(() => {
-    if (userId) {
-      fetchClusterVisualization();
-    }
-  }, [userId]);
 
   return (
     <div className="relative min-h-screen font-ubuntu-mono">
@@ -1262,9 +1269,9 @@ export default function RecommendationPage() {
                 {loading ? (
                   <div className="col-span-full text-center py-8">Loading songs...</div>
                 ) : (
-                  songs.map((song) => (
+                  songs.map((song, index) => (
                     <div
-                      key={song.song_id}
+                      key={`playlist-song-${song.song_id}-${index}`}
                       className={`bg-black/40 backdrop-blur-sm border ${
                         selectedSongs.includes(song.song_id)
                           ? 'border-green-500'
@@ -1388,9 +1395,9 @@ export default function RecommendationPage() {
                     </button>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                    {recommendations.map((song) => (
+                    {recommendations.map((song, index) => (
                       <SongCard
-                        key={`rec-${song.song_id}`}
+                        key={`rec-${song.song_id}-${index}`}
                         song={song}
                         onLike={() => handleFeedback(song.song_id, true)}
                         onDislike={() => handleFeedback(song.song_id, false)}
@@ -1414,9 +1421,9 @@ export default function RecommendationPage() {
                     <span className="px-2 py-1 bg-red-500 text-white text-sm rounded-full">Hot</span>
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                    {popularSongs.map((song) => (
+                    {popularSongs.map((song, index) => (
                       <SongCard
-                        key={`popular-${song.song_id}`}
+                        key={`popular-${song.song_id}-${index}`}
                         song={song}
                         onLike={() => handleFeedback(song.song_id, true)}
                         onDislike={() => handleFeedback(song.song_id, false)}
@@ -1434,7 +1441,7 @@ export default function RecommendationPage() {
                 <div>
                   <h3 className="text-2xl font-semibold mb-6">From Your Playlists</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                    {userSongs.map((songId) => {
+                    {userSongs.map((songId, index) => {
                       const songDetails = songs.find(s => s.song_id === songId) || {
                         song_id: songId,
                         track_name: "Loading...",
@@ -1444,7 +1451,7 @@ export default function RecommendationPage() {
                       
                       return (
                         <SongCard
-                          key={`user-song-${songId}`}
+                          key={`user-song-${songId}-${index}`}
                           song={{
                             song_id: songId,
                             track_name: songDetails.track_name,
@@ -1462,6 +1469,53 @@ export default function RecommendationPage() {
                         />
                       );
                     })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Visualization Section */}
+            <div className="mt-12">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-semibold">Music Clusters Analysis</h3>
+                <button
+                  onClick={handleVisualize}
+                  disabled={isVisualizing}
+                  className="bg-purple-500/20 hover:bg-purple-500/40 text-purple-400 
+                           px-6 py-2 rounded-lg transition-colors border border-purple-500/20 
+                           flex items-center gap-2"
+                >
+                  <FontAwesomeIcon 
+                    icon={faProjectDiagram}
+                    className={`w-5 h-5 ${isVisualizing ? 'animate-spin' : ''}`}
+                  />
+                  {isVisualizing ? 'Generating...' : 'Visualize Clusters'}
+                </button>
+              </div>
+
+              {showVisualization && clusterVisualization && (
+                <div className="p-6 bg-black/40 backdrop-blur-sm rounded-lg">
+                  <div className="flex flex-col items-center">
+                    <div className="relative w-full max-w-3xl aspect-[4/3] mb-4">
+                      <Image
+                        src={`data:image/png;base64,${clusterVisualization}`}
+                        alt="Music Clusters Visualization"
+                        fill
+                        className="object-contain"
+                        priority
+                      />
+                    </div>
+                    {clusterStats && (
+                      <div className="text-sm text-gray-400 space-y-2">
+                        <p>Number of clusters: {clusterStats.cluster_count}</p>
+                        <p>Songs per cluster: {
+                          Object.entries(clusterStats.songs_per_cluster)
+                            .map(([cluster, count]) => `Cluster ${cluster}: ${count} songs`)
+                            .join(', ')
+                        }</p>
+                        <p>Clustering radius: {clusterStats.eps_radius.toFixed(2)}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1488,37 +1542,13 @@ export default function RecommendationPage() {
         </div>
       )}
 
-      {clusterVisualization && (
-        <div className="mt-12 p-6 bg-black/40 backdrop-blur-sm rounded-lg">
-          <h3 className="text-2xl font-semibold mb-6">Your Music Clusters</h3>
-          <div className="flex flex-col items-center">
-            <div className="relative w-full max-w-3xl aspect-[4/3] mb-4">
-              <Image
-                src={`data:image/png;base64,${clusterVisualization}`}
-                alt="Music Clusters Visualization"
-                fill
-                className="object-contain"
-                priority
-              />
-            </div>
-            {clusterStats && (
-              <div className="text-sm text-gray-400 space-y-2">
-                <p>Number of clusters: {clusterStats.cluster_count}</p>
-                <p>Songs per cluster: {
-                  Object.entries(clusterStats.songs_per_cluster)
-                    .map(([cluster, count]) => `Cluster ${cluster}: ${count} songs`)
-                    .join(', ')
-                }</p>
-                <p>Clustering radius: {clusterStats.eps_radius.toFixed(2)}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Add loading overlay */}
       {isGenerating && (
         <LoadingOverlay message="Generating recommendations... This may take a moment." />
+      )}
+
+      {isVisualizing && (
+        <LoadingOverlay message="Generating cluster visualization... This may take a moment." />
       )}
     </div>
   );

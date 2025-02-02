@@ -418,8 +418,9 @@ def visualize_clusters():
         
         # Generate clusters and visualization
         X = StandardScaler().fit_transform(user_songs_df[features])
-        eps = 2 # DBSCAN eps parameter
-        dbscan = DBSCAN(eps=eps, min_samples=2)
+        eps = 1.0
+        min_samples = 2
+        dbscan = DBSCAN(eps=eps, min_samples=min_samples)
         clusters = dbscan.fit_predict(X)
         
         # Reduce dimensions for visualization
@@ -444,10 +445,10 @@ def visualize_clusters():
                 c=[color],
                 label=f'Cluster {cluster}',
                 alpha=0.6,
-                s=100  # Increase point size
+                s=100  # Point size
             )
             
-            # Draw eps radius circles around points
+            # Draw eps radius circles around points with radius 1.0
             for x, y in zip(X_pca[mask, 0], X_pca[mask, 1]):
                 circle = plt.Circle(
                     (x, y), 
@@ -459,43 +460,40 @@ def visualize_clusters():
                 )
                 ax.add_artist(circle)
         
-        # Customize plot
-        ax.set_title('Your Music Clusters', color='white', pad=20)
-        ax.set_xlabel('Principal Component 1', color='white')
-        ax.set_ylabel('Principal Component 2', color='white')
-        ax.tick_params(colors='white')
-        ax.spines['bottom'].set_color('white')
-        ax.spines['top'].set_color('white')
-        ax.spines['left'].set_color('white')
-        ax.spines['right'].set_color('white')
+        # Add legend and labels
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.set_xlabel('First Principal Component')
+        ax.set_ylabel('Second Principal Component')
         
-        # Adjust legend
-        legend = ax.legend(
-            bbox_to_anchor=(1.05, 1),
-            loc='upper left',
-            frameon=False
-        )
-        for text in legend.get_texts():
-            text.set_color('white')
+        # Equal aspect ratio for better visualization
+        ax.set_aspect('equal')
         
-        # Save plot to bytes
+        # Save plot to memory
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', transparent=True, bbox_inches='tight', dpi=300)
+        plt.savefig(buf, format='png', bbox_inches='tight', transparent=True)
         buf.seek(0)
-        plt.close()
         
         # Convert to base64
-        plot_data = base64.b64encode(buf.getvalue()).decode('utf-8')
+        image_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+        plt.close()
         
         # Convert numpy types to Python native types for JSON serialization
         cluster_counts = Counter(clusters)
-        cluster_counts_dict = {int(k): int(v) for k, v in cluster_counts.items()}
+        songs_per_cluster = {
+            str(cluster): int(count)  # Convert keys and values to standard Python types
+            for cluster, count in cluster_counts.items()
+        }
+        
+        # Calculate cluster statistics with converted types
+        cluster_stats = {
+            'cluster_count': int(len(set(clusters))),  # Convert to standard int
+            'songs_per_cluster': songs_per_cluster,    # Using converted dictionary
+            'eps_radius': float(eps)                   # Convert to standard float
+        }
         
         return jsonify({
-            "plot": plot_data,
-            "cluster_count": len(unique_clusters),
-            "songs_per_cluster": cluster_counts_dict,
-            "eps_radius": float(eps)
+            'visualization': image_base64,
+            'stats': cluster_stats
         }), 200
         
     except Exception as e:
