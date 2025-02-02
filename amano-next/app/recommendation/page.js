@@ -165,6 +165,25 @@ const LoadingOverlay = ({ message }) => (
   </div>
 );
 
+// Add this shuffle function near other utility functions
+const shuffleArray = (array) => {
+  let currentIndex = array.length, randomIndex;
+  
+  // While there remain elements to shuffle
+  while (currentIndex !== 0) {
+    // Pick a remaining element
+    randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex--;
+    
+    // And swap it with the current element
+    [array[currentIndex], array[randomIndex]] = [
+      array[randomIndex], array[currentIndex]
+    ];
+  }
+  
+  return array;
+};
+
 export default function RecommendationPage() {
   const router = useRouter();
   const [playlists, setPlaylists] = useState([]);
@@ -406,10 +425,12 @@ export default function RecommendationPage() {
           }
         }
 
-        setRecommendations(data.recommendations.recommendation_pool || []);
+        // Shuffle the arrays before setting state
+        setRecommendations(shuffleArray([...data.recommendations.recommendation_pool || []]));
         setUserSongs(data.recommendations.user_songs || []);
-        setPopularSongs(data.recommendations.popular_songs || []);
-        console.debug("Updated state with refreshed recommendations:", {
+        setPopularSongs(shuffleArray([...data.recommendations.popular_songs || []]));
+        
+        console.debug("Updated state with refreshed and shuffled recommendations:", {
           recsCount: data.recommendations.recommendation_pool?.length || 0,
           userSongsCount: userSongIds.length,
           songDetails: songs.length
@@ -420,7 +441,9 @@ export default function RecommendationPage() {
       }
     } catch (error) {
       console.error("Error refreshing recommendations:", error);
-      setMessage(`Error: ${error.message}`);
+      setMessage("Failed to refresh recommendations");
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -811,7 +834,7 @@ export default function RecommendationPage() {
     }
   };
 
-  // Fetch recommendations
+  // Modify the fetchRecommendations function to include shuffling
   const fetchRecommendations = async () => {
     console.log("Fetching recommendations...");
     try {
@@ -829,9 +852,10 @@ export default function RecommendationPage() {
       if (response.ok) {
         const data = await response.json();
         console.log("Recommendations received:", data.recommendations.length);
-        setRecommendations(data.recommendations.recommendation_pool || []);
+        // Shuffle the recommendations before setting state
+        setRecommendations(shuffleArray([...data.recommendations.recommendation_pool || []]));
         setUserSongs(data.recommendations.user_songs || []);
-        setPopularSongs(data.recommendations.popular_songs || []);
+        setPopularSongs(shuffleArray([...data.recommendations.popular_songs || []]));
         setFeedbackStatus({}); // Reset feedback status for new recommendations
       }
     } catch (error) {
