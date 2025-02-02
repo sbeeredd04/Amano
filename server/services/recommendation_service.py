@@ -709,19 +709,18 @@ def generate_recommendation_pool(user_id, current_mood, df_scaled):
     logger.info(f"Current Mood: {current_mood}")
     
     try:
-        # Get user's songs
+        # Get user's songs and liked songs
         user_songs = get_all_user_playlist_songs(user_id)
-        logger.info(f"Found {len(user_songs)} user songs")
+    
         
-        if not user_songs:
-            logger.warning("No user songs found, using fallback songs")
-            user_songs = fallback_user_songs
+        all_excluded_songs = list(set(user_songs))  # Remove duplicates
         
-        # Generate cluster-based recommendations
+        # Generate cluster-based recommendations with exclusions
         cluster_recommendations = get_cluster_weighted_recommendations(
             user_songs=user_songs,
             df_scaled=df_scaled,
-            n_recommendations=400
+            n_recommendations=400,
+            exclude_songs=all_excluded_songs  # Exclude liked songs from recommendations
         )
         
         if not cluster_recommendations:
@@ -972,24 +971,18 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
         logger.error(f"Error refreshing from pool: {str(e)}", exc_info=True)
         raise
 
-def get_cluster_weighted_recommendations(user_songs, df_scaled, n_recommendations=200):
+def get_cluster_weighted_recommendations(user_songs, df_scaled, n_recommendations=200, exclude_songs=None):
     """Get recommendations using clustering and weighted similarity scores."""
     try:
         features = FEATURES
+        exclude_songs = exclude_songs or []
+        all_excluded_songs = set(user_songs + exclude_songs)  # Use set for faster lookups
         
-        # Get user songs dataframe
+        # Get user songs dataframe for clustering only
         user_songs_df = df_scaled[df_scaled['song_id'].isin(user_songs)]
         
-        logger.info("\n=== Clustering Analysis ===")
-        logger.info(f"Total user songs: {len(user_songs_df)}")
-        logger.info("\nFeature Statistics for User Songs:")
-        for feature in features:
-            stats = user_songs_df[feature].describe()
-            logger.info(f"\n{feature.upper()}:")
-            logger.info(f"  Mean: {stats['mean']:.3f}")
-            logger.info(f"  Std:  {stats['std']:.3f}")
-            logger.info(f"  Min:  {stats['min']:.3f}")
-            logger.info(f"  Max:  {stats['max']:.3f}")
+        # Create recommendation candidate pool excluding user and excluded songs
+        recommendation_candidates = df_scaled[~df_scaled['song_id'].isin(all_excluded_songs)]
         
         if user_songs_df.empty:
             logger.warning("No user songs found in dataset")
@@ -1080,11 +1073,11 @@ def get_cluster_weighted_recommendations(user_songs, df_scaled, n_recommendation
                     cluster_weight = 1.0 / len(user_songs_df)
                     cluster_recs = get_recommendations_for_cluster(
                         cluster_songs_df,
-                        df_scaled,
+                        recommendation_candidates,
                         features,
                         cluster_weight,
                         n_recommendations,
-                        user_songs,
+                        [],  # No need to pass user_songs as we've already filtered
                         recommendation_pool
                     )
                     if cluster_recs:
@@ -1102,11 +1095,11 @@ def get_cluster_weighted_recommendations(user_songs, df_scaled, n_recommendation
                 
                 cluster_recs = get_recommendations_for_cluster(
                     cluster_songs_df,
-                    df_scaled,
+                    recommendation_candidates,
                     features,
                     cluster_weight,
                     n_recommendations,
-                    user_songs,
+                    [],  # No need to pass user_songs as we've already filtered
                     recommendation_pool
                 )
                 if cluster_recs:
