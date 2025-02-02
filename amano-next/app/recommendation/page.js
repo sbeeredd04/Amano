@@ -16,64 +16,68 @@ import Image from 'next/image';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://70bnmmdc-5000.usw3.devtunnels.ms/';
 
-const SongCard = ({ song, onLike, onDislike, feedbackStatus, onAddToPlaylist, isUserSong, isPopular }) => (
-  <div className={`bg-black/80 backdrop-blur-sm p-4 rounded-lg shadow-lg relative 
-    ${isUserSong ? 'border-2 border-green-500' : 
-      isPopular ? 'border border-red-500' : 
-      'border border-white/10'}`}>
-    {isUserSong && (
-      <div className="absolute top-2 left-2 bg-green-500/20 text-green-500 text-xs px-2 py-1 rounded-full">
-        Your Playlist
-      </div>
-    )}
-    {isPopular && (
-      <div className="absolute top-2 left-2 bg-red-500/10 text-red-500 text-xs px-2 py-1 rounded-full">
-        Popular
-      </div>
-    )}
-    
-    <button
-      onClick={() => onAddToPlaylist(song)}
-      className="absolute top-2 right-2 bg-green-400/20 hover:bg-green-400/40 text-green-400 rounded-full w-8 h-8 flex items-center justify-center transition-colors"
-      title="Add to Playlist"
-    >
-      <span className="text-xl">+</span>
-    </button>
+const SongCard = ({ song, onLike, onDislike, moodFeedbackStatus, currentMood, onAddToPlaylist, isUserSong, isPopular }) => {
+  const feedbackForCurrentMood = moodFeedbackStatus[currentMood] || {};
+  
+  return (
+    <div className={`bg-black/80 backdrop-blur-sm p-4 rounded-lg shadow-lg relative 
+      ${isUserSong ? 'border-2 border-green-500' : 
+        isPopular ? 'border border-red-500' : 
+        'border border-white/10'}`}>
+      {isUserSong && (
+        <div className="absolute top-2 left-2 bg-green-500/20 text-green-500 text-xs px-2 py-1 rounded-full">
+          Your Playlist
+        </div>
+      )}
+      {isPopular && (
+        <div className="absolute top-2 left-2 bg-red-500/10 text-red-500 text-xs px-2 py-1 rounded-full">
+          Popular
+        </div>
+      )}
+      
+      <button
+        onClick={() => onAddToPlaylist(song)}
+        className="absolute top-2 right-2 bg-green-400/20 hover:bg-green-400/40 text-green-400 rounded-full w-8 h-8 flex items-center justify-center transition-colors"
+        title="Add to Playlist"
+      >
+        <span className="text-xl">+</span>
+      </button>
 
-    <h3 className="text-lg font-semibold mb-2 mt-8">{song.track_name}</h3>
-    <p className="text-gray-400 mb-2">{song.artist_name}</p>
-    <p className="text-gray-500 mb-4">{song.album_name}</p>
-    
-    <div className="flex justify-between mt-4">
-      <button
-        onClick={onLike}
-        className={`p-2 rounded-full transition-all ${
-          feedbackStatus[song.song_id] === 'liked'
-            ? 'text-red-500 scale-110'
-            : 'text-gray-400 hover:text-red-500 hover:scale-105'
-        }`}
-      >
-        <FontAwesomeIcon 
-          icon={feedbackStatus[song.song_id] === 'liked' ? fasHeart : farHeart}
-          className="w-6 h-6"
-        />
-      </button>
-      <button
-        onClick={onDislike}
-        className={`p-2 rounded-full transition-all ${
-          feedbackStatus[song.song_id] === 'disliked'
-            ? 'text-blue-500 scale-110'
-            : 'text-gray-400 hover:text-blue-500 hover:scale-105'
-        }`}
-      >
-        <FontAwesomeIcon 
-          icon={feedbackStatus[song.song_id] === 'disliked' ? fasThumbsDown : farThumbsDown}
-          className="w-6 h-6"
-        />
-      </button>
+      <h3 className="text-lg font-semibold mb-2 mt-8">{song.track_name}</h3>
+      <p className="text-gray-400 mb-2">{song.artist_name}</p>
+      <p className="text-gray-500 mb-4">{song.album_name}</p>
+      
+      <div className="flex justify-between mt-4">
+        <button
+          onClick={onLike}
+          className={`p-2 rounded-full transition-all ${
+            feedbackForCurrentMood[song.song_id] === 'liked'
+              ? 'text-red-500 scale-110'
+              : 'text-gray-400 hover:text-red-500 hover:scale-105'
+          }`}
+        >
+          <FontAwesomeIcon 
+            icon={feedbackForCurrentMood[song.song_id] === 'liked' ? fasHeart : farHeart}
+            className="w-6 h-6"
+          />
+        </button>
+        <button
+          onClick={onDislike}
+          className={`p-2 rounded-full transition-all ${
+            feedbackForCurrentMood[song.song_id] === 'disliked'
+              ? 'text-blue-500 scale-110'
+              : 'text-gray-400 hover:text-blue-500 hover:scale-105'
+          }`}
+        >
+          <FontAwesomeIcon 
+            icon={feedbackForCurrentMood[song.song_id] === 'disliked' ? fasThumbsDown : farThumbsDown}
+            className="w-6 h-6"
+          />
+        </button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const RecommendationSourceToggle = ({ useUserSongs, setUseUserSongs }) => (
   <div className="flex items-center space-x-2">
@@ -210,7 +214,7 @@ export default function RecommendationPage() {
   const moods = ["Angry", "Content", "Happy", "Delighted", "Calm", "Sleepy", "Sad", "Depressed", "Excited"];
   const [useUserSongs, setUseUserSongs] = useState(true);
   const [pendingFeedback, setPendingFeedback] = useState([]);
-  const [feedbackStatus, setFeedbackStatus] = useState({});
+  const [moodFeedbackStatus, setMoodFeedbackStatus] = useState({});
   const [userId, setUserId] = useState(1); // Add default userId state or get from auth
   const [isPlaylistModalOpen, setIsPlaylistModalOpen] = useState(false);
   const [selectedSong, setSelectedSong] = useState(null);
@@ -382,7 +386,6 @@ export default function RecommendationPage() {
 
   const handleRefreshRecommendations = async () => {
     try {
-      setIsRefreshing(true);
       setMessage("Refreshing recommendations...");
       console.debug("Requesting refresh with params:", {
         userId,
@@ -695,6 +698,20 @@ export default function RecommendationPage() {
       console.error("Error updating mood:", error);
       setMessage("Error updating mood. Please try again.");
     }
+
+    // Load feedback for the new mood from backend
+    try {
+      const response = await fetch(`${API_URL}/recommendation/feedback/${userId}/${newMood}`);
+      if (response.ok) {
+        const moodFeedback = await response.json();
+        setMoodFeedbackStatus(prevStatus => ({
+          ...prevStatus,
+          [newMood]: moodFeedback
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading mood feedback:', error);
+    }
   };
 
   useEffect(() => {
@@ -758,23 +775,22 @@ export default function RecommendationPage() {
 
   // Handle feedback submission
   const handleFeedback = async (songId, isLike) => {
+    const userId = sessionStorage.getItem("user_id");
+    
     try {
-      // Toggle feedback if already exists
-      if (feedbackStatus[songId] === (isLike ? 'liked' : 'disliked')) {
-        const newFeedbackStatus = { ...feedbackStatus };
-        delete newFeedbackStatus[songId];
-        setFeedbackStatus(newFeedbackStatus);
-        return;
-      }
+      // Update local state for current mood
+      setMoodFeedbackStatus(prevStatus => ({
+        ...prevStatus,
+        [currentMood]: {
+          ...(prevStatus[currentMood] || {}),
+          [songId]: isLike ? 'liked' : 'disliked'
+        }
+      }));
 
-      // Set new feedback
-      setFeedbackStatus({
-        ...feedbackStatus,
-        [songId]: isLike ? 'liked' : 'disliked'
-      });
-
+      // Send to backend
       const response = await fetch(`${API_URL}/recommendation/feedback`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -858,7 +874,7 @@ export default function RecommendationPage() {
         setRecommendations(shuffleArray([...data.recommendations.recommendation_pool || []]));
         setUserSongs(data.recommendations.user_songs || []);
         setPopularSongs(shuffleArray([...data.recommendations.popular_songs || []]));
-        setFeedbackStatus({}); // Reset feedback status for new recommendations
+        setMoodFeedbackStatus({}); // Reset feedback status for new recommendations
       }
     } catch (error) {
       console.error("Error fetching recommendations:", error);
@@ -889,7 +905,8 @@ export default function RecommendationPage() {
             song={song}
             onLike={() => handleFeedback(song.song_id, true)}
             onDislike={() => handleFeedback(song.song_id, false)}
-            feedbackStatus={feedbackStatus}
+            moodFeedbackStatus={moodFeedbackStatus}
+            currentMood={currentMood}
             onAddToPlaylist={(song) => {
               setSelectedSong(song);
               setIsPlaylistModalOpen(true);
@@ -912,7 +929,8 @@ export default function RecommendationPage() {
             song={song}
             onLike={() => handleFeedback(song.song_id, true)}
             onDislike={() => handleFeedback(song.song_id, false)}
-            feedbackStatus={feedbackStatus}
+            moodFeedbackStatus={moodFeedbackStatus}
+            currentMood={currentMood}
             onAddToPlaylist={handleAddToPlaylist}
             isPopular={true}
           />
@@ -1450,7 +1468,8 @@ export default function RecommendationPage() {
                         song={song}
                         onLike={() => handleFeedback(song.song_id, true)}
                         onDislike={() => handleFeedback(song.song_id, false)}
-                        feedbackStatus={feedbackStatus}
+                        moodFeedbackStatus={moodFeedbackStatus}
+                        currentMood={currentMood}
                         onAddToPlaylist={(song) => {
                           setSelectedSong(song);
                           setIsPlaylistModalOpen(true);
@@ -1476,7 +1495,8 @@ export default function RecommendationPage() {
                         song={song}
                         onLike={() => handleFeedback(song.song_id, true)}
                         onDislike={() => handleFeedback(song.song_id, false)}
-                        feedbackStatus={feedbackStatus}
+                        moodFeedbackStatus={moodFeedbackStatus}
+                        currentMood={currentMood}
                         onAddToPlaylist={handleAddToPlaylist}
                         isPopular={true}
                       />
@@ -1509,7 +1529,8 @@ export default function RecommendationPage() {
                           }}
                           onLike={() => handleFeedback(songId, true)}
                           onDislike={() => handleFeedback(songId, false)}
-                          feedbackStatus={feedbackStatus}
+                          moodFeedbackStatus={moodFeedbackStatus}
+                          currentMood={currentMood}
                           onAddToPlaylist={(song) => {
                             setSelectedSong(song);
                             setIsPlaylistModalOpen(true);

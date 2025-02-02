@@ -33,7 +33,7 @@ FEATURE_WEIGHTS = {
     'tempo': 5.0,
     'instrumentalness': 5.0,
     'speechiness': 5.0,
-    'popularity': 5.0
+    'popularity': 1.0
 }
 
 # DQN Model Definition
@@ -443,7 +443,7 @@ def get_next_state_and_reward(action, recommended_songs_df):
     return next_state, reward
 
 
-def get_dqn_recommendations(user_id, df_scaled, current_mood, n_recommendations=320):
+def get_dqn_recommendations(user_id, df_scaled, current_mood, candidate_songs, n_recommendations=320):
     """Get recommendations using trained DQN model."""
     logger.info("\n=== Generating DQN Recommendations ===")
     
@@ -466,11 +466,7 @@ def get_dqn_recommendations(user_id, df_scaled, current_mood, n_recommendations=
         logger.info(f"Total unique user and liked songs: {len(all_user_songs)}")
         
         # Get candidate songs using clustering with larger pool
-        candidate_songs = get_cluster_weighted_recommendations(
-            user_songs=all_user_songs,
-            df_scaled=df_scaled,
-            n_recommendations=500  # Increased pool for better diversity
-        )
+        candidate_songs = candidate_songs
         
         if not candidate_songs:
             logger.error("No candidate songs generated")
@@ -719,7 +715,7 @@ def generate_recommendation_pool(user_id, current_mood, df_scaled):
         cluster_recommendations = get_cluster_weighted_recommendations(
             user_songs=user_songs,
             df_scaled=df_scaled,
-            n_recommendations=400,
+            n_recommendations=1000,
             exclude_songs=all_excluded_songs  # Exclude liked songs from recommendations
         )
         
@@ -736,9 +732,10 @@ def generate_recommendation_pool(user_id, current_mood, df_scaled):
                 raise Exception("Failed to generate any recommendations")
             cluster_recommendations = popular_recs
         
-        logger.info("\nRecommended Songs:")
-        for rec in cluster_recommendations[:100]:  # Show top 100
-            logger.info(f"{rec['track_name']} by {rec['artist_name']} (similarity: {rec['similarity']:.3f})")
+        else:
+            logger.info("\nRecommended Songs:")
+            for rec in cluster_recommendations[:100]:  # Show top 100
+                logger.info(f"{rec['track_name']} by {rec['artist_name']} (similarity: {rec['similarity']:.3f})")
         
         # Get additional popular recommendations for diversity
         popular_songs = get_popular_recommendations(
@@ -748,9 +745,6 @@ def generate_recommendation_pool(user_id, current_mood, df_scaled):
             limit=30,
             exclude_songs=user_songs + cluster_recommendations
         )
-        
-        # Combine popular and novel for additional recommendations
-        additional_recommendations = popular_songs
         
         # Check if DQN model exists and has enough feedback
         session = get_session()
@@ -772,7 +766,8 @@ def generate_recommendation_pool(user_id, current_mood, df_scaled):
                     dqn_recommendations = get_dqn_recommendations(
                         user_id=user_id,
                         df_scaled=df_scaled,
-                        current_mood=current_mood
+                        current_mood=current_mood,
+                        candidate_songs=cluster_recommendations
                     )
                     if dqn_recommendations:
                         final_recommendations = dqn_recommendations
@@ -850,9 +845,9 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
         if refresh_type == 'smart':
             # Define ratios for different types of recommendations
             keep_ratio = 0.3  # Keep 30% of previous recommendations
-            popular_ratio = 0.7  # 40% popular songs from pool
+            popular_ratio = 0.7  # 70% popular songs from pool
             
-            total_new_recs = 20  # Base number of recommendations from pool
+            total_new_recs = 40  # Increased from 20 to 40 for base recommendations
             
             # Calculate counts for each category
             n_keep = int(total_new_recs * keep_ratio)
@@ -866,7 +861,7 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
                 # Sort by similarity and popularity
                 sorted_prev = sorted(
                     previous_recs,
-                    key=lambda x: (x.get('similarity', 0) * 0.6 + x.get('popularity', 0) * 0.4),
+                    key=lambda x: (x.get('similarity', 0) * 0.8 + x.get('popularity', 0) * 0.2),
                     reverse=True
                 )
                 kept_recs = sorted_prev[:n_keep]
@@ -878,7 +873,7 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
             # Sort pool by popularity and similarity
             popular_pool = sorted(
                 available_pool,
-                key=lambda x: (x.get('popularity', 0) * 0.4 + x.get('similarity', 0) * 0.6),
+                key=lambda x: (x.get('popularity', 0) * 0.2 + x.get('similarity', 0) * 0.8),
                 reverse=True
             )
             popular_recs = popular_pool[:n_popular]
@@ -894,7 +889,7 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
                         user_id=user_id,
                         genres=None,
                         mood=None,
-                        limit=15,     # Increased from 10 to 15
+                        limit=30,     # Increased from 15 to 30
                         exclude_songs=kept_recs + popular_recs
                     )
                     
@@ -909,9 +904,9 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
             new_recommendations = kept_recs + popular_recs
             additional_popular = extra_popular
             
-            # Always include user playlist songs
+            # Always include user playlist songs (increased to 30)
             if user_songs_pool:
-                user_recs = random.sample(user_songs_pool, min(5, len(user_songs_pool)))
+                user_recs = random.sample(user_songs_pool, min(30, len(user_songs_pool)))
             else:
                 user_recs = []
             
@@ -935,7 +930,7 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
             
         else:
             # Simple refresh - get random selections plus extra popular
-            new_recs = random.sample(recommendation_pool, min(20, len(recommendation_pool)))
+            new_recs = random.sample(recommendation_pool, min(40, len(recommendation_pool)))  # Increased from 20 to 40
             
             # Add popular and novel recommendations for simple refresh
             try:
@@ -945,7 +940,7 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
                         user_id=user_id,
                         genres=None,
                         mood=None,
-                        limit=20,     # Get more recommendations for simple refresh
+                        limit=30,     # Increased from 20 to 30
                         exclude_songs=new_recs
                     )
                     new_recs.extend(extra_popular)
@@ -953,9 +948,9 @@ def refresh_from_pool(pool, previous_recs, refresh_type='smart'):
             except Exception as e:
                 logger.error(f"Error getting extra popular recommendations: {e}")
             
-            # Always include 5 random user playlist songs
+            # Always include random user playlist songs (increased to 30)
             if user_songs_pool:
-                user_recs = random.sample(user_songs_pool, min(5, len(user_songs_pool)))
+                user_recs = random.sample(user_songs_pool, min(30, len(user_songs_pool)))
             else:
                 logger.warning("No user songs in pool")
                 user_recs = []
@@ -1134,8 +1129,8 @@ def get_recommendations_for_cluster(cluster_songs_df, df_scaled, features, clust
         cluster_df = df_scaled.copy()
         cluster_df['similarity'] = similarity_scores
         cluster_df['weighted_score'] = (
-            cluster_df['similarity'] * 0.6 +
-            cluster_df['popularity'] * 0.4
+            cluster_df['similarity'] * 0.8 +
+            cluster_df['popularity'] * 0.2
         )
         
         # Filter out user songs and existing recommendations

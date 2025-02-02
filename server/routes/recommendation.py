@@ -313,9 +313,9 @@ def generate_recommendations():
             
             # Send limited set to frontend
             recommendations = {
-                'recommendation_pool': new_recs['recommendation_pool'][:30],  # Limit to 30
-                'user_songs': new_recs['user_songs'][:30],  # Limit to 30
-                'popular_songs': new_recs.get('popular_songs', [])[:20],  # Limit to 20
+                'recommendation_pool': new_recs['recommendation_pool'][:40],  
+                'user_songs': new_recs['user_songs'][:30],  
+                'popular_songs': new_recs.get('popular_songs', [])[:30],  
                 'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
                 'source': source
             }
@@ -343,60 +343,6 @@ def generate_recommendations():
         logger.error(f"Error in recommendation endpoint: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-def background_pool_refresh(user_id, current_mood, existing_pool):
-    """Background task to refresh recommendation pool."""
-    try:
-        logger.info(f"Starting background pool refresh for user {user_id}")
-        refreshed_pool = refresh_from_pool(
-            pool=existing_pool,
-            previous_recs=existing_pool,
-            refresh_type='smart'
-        )
-        
-        session = get_session()
-        try:
-            pool_record = session.query(RecommendationPool)\
-                .filter_by(user_id=user_id)\
-                .order_by(RecommendationPool.created_at.desc())\
-                .first()
-                
-            if pool_record:
-                pool_record.recommendation_pool = refreshed_pool
-                pool_record.updated_at = datetime.utcnow()
-                session.commit()
-                logger.info("Background pool refresh completed")
-        finally:
-            session.close()
-            
-    except Exception as e:
-        logger.error(f"Error in background pool refresh: {str(e)}", exc_info=True)
-
-def background_pool_generation(user_id, current_mood):
-    """Background task to generate new recommendation pool."""
-    try:
-        logger.info(f"Starting background pool generation for user {user_id}")
-        new_recommendations = generate_recommendation_pool(
-            user_id=user_id,
-            current_mood=current_mood,
-            df_scaled=df_scaled
-        )
-        
-        session = get_session()
-        try:
-            new_pool = RecommendationPool(
-                user_id=user_id,
-                user_songs_pool=new_recommendations['user_songs'],
-                recommendation_pool=new_recommendations['recommendation_pool'],
-                created_at=datetime.utcnow()
-            )
-            session.add(new_pool)
-            session.commit()
-            logger.info("Background pool generation completed")
-        finally:
-            session.close()
-            
-    except Exception as e:
-        logger.error(f"Error in background pool generation: {str(e)}", exc_info=True)
 
 @recommendation_bp.route('/visualize', methods=['POST'])
 def visualize_clusters():
