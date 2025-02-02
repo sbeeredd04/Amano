@@ -96,7 +96,7 @@ const PlaylistModal = ({ isOpen, onClose, onSubmit, playlists, onCreateNew }) =>
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="bg-black/60 border border-white/10 p-6 rounded-lg w-96 backdrop-blur-sm">
         <h2 className="text-xl font-bold mb-6">Add to Playlist</h2>
         
@@ -157,8 +157,8 @@ const PlaylistModal = ({ isOpen, onClose, onSubmit, playlists, onCreateNew }) =>
 
 // Add this loading component near the top with other components
 const LoadingOverlay = ({ message }) => (
-  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-    <div className="bg-black/60 border border-white/10 p-8 rounded-lg flex flex-col items-center">
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="bg-black/80 border border-white/10 p-8 rounded-lg flex flex-col items-center">
       <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-green-500 mb-4"></div>
       <p className="text-lg text-white">{message}</p>
     </div>
@@ -924,7 +924,7 @@ export default function RecommendationPage() {
         body: JSON.stringify({
           playlist_id: playlistId,
           song_id: selectedSong.song_id,
-          action: 'add'  // Explicitly specify the action
+          action: 'add'
         })
       });
 
@@ -932,13 +932,30 @@ export default function RecommendationPage() {
       console.debug("Server response:", data);
 
       if (response.ok) {
-        // Update the playlists state with the updated playlist
+        // First updates the local state immediately
         setPlaylists(prevPlaylists => 
           prevPlaylists.map(playlist => 
             playlist.playlist_id === playlistId ? data.playlist : playlist
           )
         );
-        setMessage(data.message || "Song added to playlist successfully!");
+        setMessage("Song added to playlist");
+        
+        // Fetch playlists in the background without awaiting
+        Promise.resolve().then(async () => {
+          try {
+            const userId = sessionStorage.getItem("user_id");
+            if (userId) {
+              const playlistsResponse = await fetch(`${API_URL}/playlists/get?user_id=${userId}`);
+              if (playlistsResponse.ok) {
+                const playlistsData = await playlistsResponse.json();
+                setPlaylists(playlistsData.playlists);
+              }
+            }
+          } catch (error) {
+            console.error("Background playlist refresh failed:", error);
+            // Don't show error message to user since this is background refresh
+          }
+        });
       } else {
         throw new Error(data.error || 'Failed to add song to playlist');
       }
@@ -969,7 +986,14 @@ export default function RecommendationPage() {
       if (response.ok) {
         const data = await response.json();
         setPlaylists([...playlists, data.playlist]);
-        setMessage("New playlist created and song added successfully!");
+        setMessage("New playlist created with song(s)!");
+        
+        // Fetch updated playlists using correct endpoint
+        const playlistsResponse = await fetch(`${API_URL}/playlists/get?user_id=${userId}`);
+        if (playlistsResponse.ok) {
+          const playlistsData = await playlistsResponse.json();
+          setPlaylists(playlistsData.playlists);
+        }
       } else {
         setMessage("Failed to create playlist");
       }
