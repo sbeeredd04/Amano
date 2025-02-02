@@ -705,45 +705,112 @@ def get_cluster_based_recommendations(user_songs, df_scaled, n_recommendations=1
     
 
 def get_popular_recommendations(user_id, genres=None, mood=None, limit=10, exclude_songs=None):
-    """Get popular song recommendations with optional genre and mood filtering."""
+    """
+    Get popular recommendations using clustering and similarity,
+    ordered by popularity while maintaining cluster proportions.
+    """
     try:
-        logger.info(f"Getting popular recommendations:")
-        logger.info(f"- User ID: {user_id}")
-        logger.info(f"- Genres: {genres}")
-        logger.info(f"- Mood: {mood}")
-        logger.info(f"- Limit: {limit}")
+        logger.info(f"\n=== Getting Popular Recommendations ===")
+        logger.info(f"User ID: {user_id}")
+        logger.info(f"Requested limit: {limit}")
         
         session = get_session()
-        query = session.query(Song)
+        df_scaled = get_dataset()
         
-        # Filter by genres if provided
-        if genres:
-            query = query.filter(Song.track_genre.in_(genres))
+        # Get user's songs for similarity calculation
+        user_songs = get_all_user_playlist_songs(user_id)
+        if not user_songs:
+            logger.warning("No user songs found - falling back to pure popularity")
+            query = session.query(Song)
+            if exclude_songs:
+                query = query.filter(~Song.song_id.in_(exclude_songs))
+            return query.order_by(Song.popularity.desc()).limit(limit).all()
             
-        # Exclude songs if provided
-        if exclude_songs:
-            exclude_ids = [song.get('song_id') if isinstance(song, dict) else song 
-                         for song in exclude_songs]
-            query = query.filter(~Song.song_id.in_(exclude_ids))
-            
-        # Order by popularity and get recommendations
-        recommendations = query.order_by(Song.popularity.desc())\
-            .limit(limit)\
-            .all()
-            
-        # Convert to dictionary format
-        recommendations = [{
-            'song_id': song.song_id,
-            'track_name': song.track_name,
-            'artist_name': song.artists,
-            'track_genre': song.track_genre,
-            'popularity': song.popularity,
-            'similarity': 0.5  # Default similarity for popular recommendations
-        } for song in recommendations]
+        # Get user songs DataFrame
+        user_songs_df = df_scaled[df_scaled['song_id'].isin(user_songs)].copy()
+        logger.info(f"Found {len(user_songs_df)} user songs for clustering")
         
-        logger.info(f"Found {len(recommendations)} popular recommendations")
-        return recommendations
+        # Perform clustering on user songs
+        X = user_songs_df[FEATURES].values
+        dbscan = DBSCAN(eps=0.5, min_samples=2)
+        clusters = dbscan.fit_predict(X)
         
+        # Count songs in each cluster
+        cluster_counts = Counter(clusters)
+        logger.info(f"Found {len(cluster_counts)} clusters")
+        
+        # Calculate cluster weights
+        total_songs = len(user_songs_df)
+        cluster_weights = {
+            cluster_id: count / total_songs 
+            for cluster_id, count in cluster_counts.items()
+        }
+        
+        all_recommendations = []
+        
+        # Process each cluster
+        for cluster_id in cluster_counts:
+            cluster_mask = clusters == cluster_id
+            cluster_songs = user_songs_df[cluster_mask]
+            
+            # Calculate similarity for all songs
+            similarity_matrix = cosine_similarity(
+                df_scaled[FEATURES].values,
+                cluster_songs[FEATURES].values
+            )
+            
+            # Get maximum similarity for each song
+            max_similarities = np.max(similarity_matrix, axis=1)
+            
+            # Filter songs above similarity threshold
+            similarity_mask = max_similarities >= 0.6
+            candidate_indices = np.where(similarity_mask)[0]
+            
+            if len(candidate_indices) == 0:
+                continue
+                
+            # Get candidate songs
+            candidates_df = df_scaled.iloc[candidate_indices].copy()
+            candidates_df['similarity'] = max_similarities[candidate_indices]
+            
+            # Exclude user songs and previously excluded songs
+            exclude_ids = user_songs + (exclude_songs or [])
+            candidates_df = candidates_df[~candidates_df['song_id'].isin(exclude_ids)]
+            
+            # Calculate recommendations for this cluster based on its weight
+            cluster_limit = max(2, int(limit * cluster_weights[cluster_id]))
+            
+            # Order by popularity and get top songs
+            cluster_recommendations = candidates_df.nlargest(cluster_limit, 'popularity')
+            
+            if not cluster_recommendations.empty:
+                all_recommendations.append(cluster_recommendations)
+        
+        # Combine and sort final recommendations
+        if all_recommendations:
+            final_recommendations = pd.concat(all_recommendations)
+            final_recommendations = final_recommendations.nlargest(limit, 'popularity')
+            
+            # Convert to dictionary format
+            recommendations = [{
+                'song_id': row['song_id'],
+                'track_name': row['track_name'],
+                'artist_name': row['artist_name'],
+                'track_genre': row['track_genre'],
+                'popularity': row['popularity'],
+                'similarity': row['similarity']
+            } for _, row in final_recommendations.iterrows()]
+            
+            logger.info(f"Generated {len(recommendations)} popular recommendations")
+            return recommendations
+            
+        else:
+            logger.warning("No recommendations generated - falling back to pure popularity")
+            query = session.query(Song)
+            if exclude_songs:
+                query = query.filter(~Song.song_id.in_(exclude_songs))
+            return query.order_by(Song.popularity.desc()).limit(limit).all()
+            
     except Exception as e:
         logger.error(f"Error getting popular recommendations: {str(e)}", exc_info=True)
         return []
@@ -878,10 +945,9 @@ def generate_recommendation_pool(user_id, current_mood, df_scaled):
                         logger.info("Successfully generated DQN recommendations")
                 except Exception as e:
                     logger.error(f"Error getting DQN recommendations: {e}")
-                    # Continue with cluster recommendations
             
-            # Start background training if enough feedback
-            if history_count >= 5:
+            # Increased threshold to 100
+            if history_count >= 100:  # Changed from 5 to 100
                 logger.info("Feedback threshold reached - initiating background DQN training")
                 Thread(target=run_background_training, 
                        args=(user_id, df_scaled, FEATURES, FEATURE_WEIGHTS)).start()
@@ -891,7 +957,7 @@ def generate_recommendation_pool(user_id, current_mood, df_scaled):
             return {
                 'recommendation_pool': final_recommendations,
                 'user_songs': user_songs,
-                'popular_songs': popular_songs,  # Make sure this is included
+                'popular_songs': popular_songs,
                 'has_dqn_model': model_exists,
                 'source': source
             }
