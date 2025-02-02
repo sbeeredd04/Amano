@@ -225,6 +225,7 @@ export default function RecommendationPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [showVisualization, setShowVisualization] = useState(false);
   const [isVisualizing, setIsVisualizing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     const userId = sessionStorage.getItem("user_id");
@@ -381,6 +382,7 @@ export default function RecommendationPage() {
 
   const handleRefreshRecommendations = async () => {
     try {
+      setIsRefreshing(true);
       setMessage("Refreshing recommendations...");
       console.debug("Requesting refresh with params:", {
         userId,
