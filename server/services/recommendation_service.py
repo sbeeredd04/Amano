@@ -791,7 +791,7 @@ def generate_recommendation_pool(user_id, current_mood, df_scaled):
             user_id=user_id,
             genres=None,
             mood=current_mood,
-            limit=15,
+            limit=20, 
             exclude_songs=[]
         )
         

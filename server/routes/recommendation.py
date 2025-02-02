@@ -296,9 +296,9 @@ def generate_recommendations():
                         logger.debug("Using cached pool")
                         source = 'cached'
                         recommendations = {
-                            'recommendation_pool': existing_pool.recommendation_pool,
-                            'user_songs': existing_pool.user_songs_pool,
-                            'popular_songs': existing_pool.popular_songs_pool,
+                            'recommendation_pool': existing_pool.recommendation_pool[:30],  # Limit to 30
+                            'user_songs': existing_pool.user_songs_pool[:30],  # Limit to 30
+                            'popular_songs': existing_pool.popular_songs_pool[:30] if existing_pool.popular_songs_pool else [],  # Limit to 20
                             'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
                             'source': source
                         }
@@ -316,9 +316,9 @@ def generate_recommendations():
                         
                         source = 'refreshed'
                         recommendations = {
-                            'recommendation_pool': refreshed_pool['new_songs'],
-                            'user_songs': refreshed_pool['user_songs'],
-                            'popular_songs': refreshed_pool.get('popular_songs', []),
+                            'recommendation_pool': refreshed_pool['new_songs'][:30],  # Limit to 30
+                            'user_songs': refreshed_pool['user_songs'][:30],  # Limit to 30
+                            'popular_songs': refreshed_pool.get('popular_songs', [])[:30],  # Limit to 20
                             'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
                             'source': source
                         }
@@ -337,30 +337,32 @@ def generate_recommendations():
                     return jsonify({"error": "Failed to generate recommendations"}), 500
                 
                 source = new_recs.get('source', 'new')
-                recommendations = {
-                    'recommendation_pool': new_recs['recommendation_pool'],
-                    'user_songs': new_recs['user_songs'],
-                    'popular_songs': new_recs.get('popular_songs', []),
-                    'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
-                    'source': source
-                }
                 
-                # Store new recommendations in pool
+                # Store full pool in database
                 new_pool = RecommendationPool(
                     user_id=user_id,
-                    recommendation_pool=recommendations['recommendation_pool'],
-                    user_songs_pool=recommendations['user_songs'],
-                    popular_songs_pool=recommendations['popular_songs'],
+                    recommendation_pool=new_recs['recommendation_pool'],
+                    user_songs_pool=new_recs['user_songs'],
+                    popular_songs_pool=new_recs.get('popular_songs', []),
                     created_at=datetime.utcnow()
                 )
                 session.add(new_pool)
                 session.commit()
+                
+                # Send limited set to frontend
+                recommendations = {
+                    'recommendation_pool': new_recs['recommendation_pool'][:30],  # Limit to 30
+                    'user_songs': new_recs['user_songs'][:30],  # Limit to 30
+                    'popular_songs': new_recs.get('popular_songs', [])[:30],  # Limit to 20
+                    'has_dqn_model': os.path.exists(f'models/dqn/dqn_user_{user_id}.pth'),
+                    'source': source
+                }
             
             # Debug final response
             logger.info("\n=== Final Response Content ===")
-            logger.info(f"Recommendation pool size: {len(recommendations['recommendation_pool'])}")
-            logger.info(f"User songs size: {len(recommendations['user_songs'])}")
-            logger.info(f"Popular songs size: {len(recommendations.get('popular_songs', []))}")
+            logger.info(f"Recommendation pool size (limited): {len(recommendations['recommendation_pool'])}")
+            logger.info(f"User songs size (limited): {len(recommendations['user_songs'])}")
+            logger.info(f"Popular songs size (limited): {len(recommendations.get('popular_songs', []))}")
             logger.info(f"Source: {source}")
             
             return jsonify({

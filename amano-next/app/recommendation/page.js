@@ -815,21 +815,53 @@ export default function RecommendationPage() {
 
   // Render recommendations section
   const renderRecommendations = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {recommendations.map((song) => (
-        <SongCard
-          key={song.song_id}
-          song={song}
-          onLike={() => handleFeedback(song.song_id, true)}
-          onDislike={() => handleFeedback(song.song_id, false)}
-          feedbackStatus={feedbackStatus}
-          onAddToPlaylist={(song) => {
-            setSelectedSong(song);
-            setIsPlaylistModalOpen(true);
-          }}
-          isUserSong={false}
-        />
-      ))}
+    <div className="space-y-6">
+      <div className="flex justify-between items-center mb-8">
+        <h3 className="text-2xl font-semibold">New For You</h3>
+        <button
+          onClick={handleRefreshRecommendations}
+          className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all flex items-center gap-2"
+        >
+          <FontAwesomeIcon 
+            icon={faRotate}
+            className="w-5 h-5"
+          />
+          Refresh
+        </button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        {recommendations.map((song) => (
+          <SongCard
+            key={song.song_id}
+            song={song}
+            onLike={() => handleFeedback(song.song_id, true)}
+            onDislike={() => handleFeedback(song.song_id, false)}
+            feedbackStatus={feedbackStatus}
+            onAddToPlaylist={handleAddToPlaylist}
+            isUserSong={false}
+          />
+        ))}
+      </div>
+    </div>
+  );
+
+  // Update the popular songs section
+  const renderPopularSongs = () => (
+    <div className="space-y-6">
+      <h3 className="text-2xl font-semibold mb-8">Popular Now</h3>
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        {popularSongs.map((song) => (
+          <SongCard
+            key={song.song_id}
+            song={song}
+            onLike={() => handleFeedback(song.song_id, true)}
+            onDislike={() => handleFeedback(song.song_id, false)}
+            feedbackStatus={feedbackStatus}
+            onAddToPlaylist={handleAddToPlaylist}
+            isPopular={true}
+          />
+        ))}
+      </div>
     </div>
   );
 
@@ -1244,43 +1276,58 @@ export default function RecommendationPage() {
           <section id="recommendations" className="min-h-screen p-6 pt-32 bg-transparent">
             <h2 className="text-4xl font-bold text-center mb-12">Your Recommendations</h2>
             
-            <div className="max-w-7xl mx-auto mb-8">
-              <div className="bg-black/60 backdrop-blur-sm p-4 rounded-lg flex items-center justify-between gap-4 flex-wrap border border-white/10">
-                <div className="flex items-center gap-6">
-                  <div className="flex items-center space-x-2">
-                    <label className="text-sm font-medium">Current Mood:</label>
-                    <select
-                      value={currentMood}
-                      onChange={(e) => setCurrentMood(e.target.value)}
-                      className="bg-black/40 text-white rounded px-3 py-1 border border-white/10 min-w-[140px]"
-                    >
-                      {moods.map((mood) => (
-                        <option key={mood} value={mood}>{mood}</option>
-                      ))}
-                    </select>
+            <div className="max-w-[1920px] mx-auto px-4">
+              <div className="max-w-full mx-auto mb-8">
+                <div className="bg-black/60 backdrop-blur-sm p-4 rounded-lg flex items-center justify-between gap-4 flex-wrap border border-white/10">
+                  <div className="flex items-center gap-6">
+                    <div className="flex items-center space-x-2">
+                      <label className="text-sm font-medium">Current Mood:</label>
+                      <select
+                        value={currentMood}
+                        onChange={(e) => setCurrentMood(e.target.value)}
+                        className="bg-black/40 text-white rounded px-3 py-1 border border-white/10 min-w-[140px]"
+                      >
+                        {moods.map((mood) => (
+                          <option key={mood} value={mood}>{mood}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <RecommendationSourceToggle 
+                      useUserSongs={useUserSongs} 
+                      setUseUserSongs={setUseUserSongs} 
+                    />
                   </div>
 
-                  <RecommendationSourceToggle 
-                    useUserSongs={useUserSongs} 
-                    setUseUserSongs={setUseUserSongs} 
-                  />
+                  <button
+                    onClick={handleInitialRecommendations}
+                    className="bg-green-400/20 hover:bg-green-400/40 text-green-400 px-6 py-1 rounded-lg transition-colors border border-green-400/20"
+                  >
+                    Generate Recommendations
+                  </button>
                 </div>
-
-                <button
-                  onClick={handleInitialRecommendations}
-                  className="bg-green-400/20 hover:bg-green-400/40 text-green-400 px-6 py-1 rounded-lg transition-colors border border-green-400/20"
-                >
-                  Generate Recommendations
-                </button>
               </div>
             </div>
 
-            <div className="max-w-6xl mx-auto">
+            <div className="max-w-full mx-auto px-32">
               {/* Regular Recommendations */}
               {recommendations.length > 0 && (
                 <div className="mb-12">
-                  <h3 className="text-2xl font-semibold mb-6">Recommended Songs</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-2xl font-semibold">Recommended Songs</h3>
+                    <button
+                      onClick={handleRefreshRecommendations}
+                      className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all flex items-center gap-2"
+                      title="Refresh Recommendations"
+                    >
+                      <FontAwesomeIcon 
+                        icon={faRotate}
+                        className="w-5 h-5"
+                      />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                     {recommendations.map((song) => (
                       <SongCard
                         key={`rec-${song.song_id}`}
@@ -1306,7 +1353,7 @@ export default function RecommendationPage() {
                     <span>Popular Songs</span>
                     <span className="px-2 py-1 bg-red-500 text-white text-sm rounded-full">Hot</span>
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                     {popularSongs.map((song) => (
                       <SongCard
                         key={`popular-${song.song_id}`}
@@ -1314,11 +1361,7 @@ export default function RecommendationPage() {
                         onLike={() => handleFeedback(song.song_id, true)}
                         onDislike={() => handleFeedback(song.song_id, false)}
                         feedbackStatus={feedbackStatus}
-                        onAddToPlaylist={(song) => {
-                          setSelectedSong(song);
-                          setIsPlaylistModalOpen(true);
-                        }}
-                        isUserSong={false}
+                        onAddToPlaylist={handleAddToPlaylist}
                         isPopular={true}
                       />
                     ))}
@@ -1330,9 +1373,8 @@ export default function RecommendationPage() {
               {userSongs.length > 0 && (
                 <div>
                   <h3 className="text-2xl font-semibold mb-6">From Your Playlists</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                     {userSongs.map((songId) => {
-                      // Find the full song details from the songs array
                       const songDetails = songs.find(s => s.song_id === songId) || {
                         song_id: songId,
                         track_name: "Loading...",
@@ -1341,7 +1383,7 @@ export default function RecommendationPage() {
                       };
                       
                       return (
-                      <SongCard
+                        <SongCard
                           key={`user-song-${songId}`}
                           song={{
                             song_id: songId,
@@ -1351,13 +1393,13 @@ export default function RecommendationPage() {
                           }}
                           onLike={() => handleFeedback(songId, true)}
                           onDislike={() => handleFeedback(songId, false)}
-                        feedbackStatus={feedbackStatus}
-                        onAddToPlaylist={(song) => {
-                          setSelectedSong(song);
-                          setIsPlaylistModalOpen(true);
-                        }}
-                        isUserSong={true}
-                      />
+                          feedbackStatus={feedbackStatus}
+                          onAddToPlaylist={(song) => {
+                            setSelectedSong(song);
+                            setIsPlaylistModalOpen(true);
+                          }}
+                          isUserSong={true}
+                        />
                       );
                     })}
                   </div>
