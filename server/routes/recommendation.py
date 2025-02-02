@@ -19,6 +19,16 @@ from datetime import datetime
 from models.recommendation_model import RecommendationPool
 from sqlalchemy import inspect
 from threading import Thread
+from matplotlib import pyplot as plt
+import io
+import base64
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import DBSCAN
+from collections import Counter
+import matplotlib
+matplotlib.use('Agg')  # Add this at the top after imports
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +250,7 @@ def manage_mood():
 def generate_recommendations():
     """
     Comprehensive recommendation pipeline endpoint.
-    Always generates fresh recommendations.
+    Always generates fresh recommendations after clearing existing ones.
     """
     try:
         data = request.json
@@ -256,6 +266,18 @@ def generate_recommendations():
             
         session = get_session()
         try:
+            # Clear existing recommendation pools for this user
+            logger.info(f"Clearing existing recommendation pools for user {user_id}")
+            existing_pools = session.query(RecommendationPool)\
+                .filter_by(user_id=user_id)\
+                .all()
+            
+            if existing_pools:
+                for pool in existing_pools:
+                    session.delete(pool)
+                session.commit()
+                logger.info(f"Cleared {len(existing_pools)} existing recommendation pools")
+            
             # Debug user's playlists
             playlists = session.query(Playlist).filter_by(user_id=user_id).all()
             logger.debug(f"Found {len(playlists)} playlists for user {user_id}")
@@ -277,7 +299,7 @@ def generate_recommendations():
             
             source = new_recs.get('source', 'new')
             
-            # Store full pool in database
+            # Store new pool in database
             new_pool = RecommendationPool(
                 user_id=user_id,
                 recommendation_pool=new_recs['recommendation_pool'],
@@ -287,6 +309,7 @@ def generate_recommendations():
             )
             session.add(new_pool)
             session.commit()
+            logger.info("Stored new recommendation pool in database")
             
             # Send limited set to frontend
             recommendations = {
@@ -374,4 +397,108 @@ def background_pool_generation(user_id, current_mood):
             
     except Exception as e:
         logger.error(f"Error in background pool generation: {str(e)}", exc_info=True)
+
+@recommendation_bp.route('/visualize', methods=['POST'])
+def visualize_clusters():
+    """Generate cluster visualization for user songs."""
+    try:
+        data = request.json
+        user_id = data.get('user_id')
+        
+        if not user_id:
+            return jsonify({"error": "User ID is required"}), 400
+            
+        # Get user songs
+        user_songs = get_all_user_playlist_songs(user_id)
+        if not user_songs:
+            return jsonify({"error": "No user songs found"}), 404
+            
+        # Get visualization data
+        user_songs_df = df_scaled[df_scaled['song_id'].isin(user_songs)].copy()
+        
+        # Generate clusters and visualization
+        X = StandardScaler().fit_transform(user_songs_df[features])
+        eps = 6  # DBSCAN eps parameter
+        dbscan = DBSCAN(eps=eps, min_samples=1)
+        clusters = dbscan.fit_predict(X)
+        
+        # Reduce dimensions for visualization
+        pca = PCA(n_components=2)
+        X_pca = pca.fit_transform(X)
+        
+        # Create plot with dark theme
+        plt.style.use('dark_background')
+        fig, ax = plt.subplots(figsize=(10, 8))
+        fig.patch.set_facecolor('#00000000')  # Transparent background
+        ax.set_facecolor('#00000000')  # Transparent plot background
+        
+        # Plot each cluster with different color
+        unique_clusters = set(clusters)
+        colors = plt.cm.rainbow(np.linspace(0, 1, len(unique_clusters)))
+        
+        for cluster, color in zip(unique_clusters, colors):
+            mask = clusters == cluster
+            ax.scatter(
+                X_pca[mask, 0],
+                X_pca[mask, 1],
+                c=[color],
+                label=f'Cluster {cluster}',
+                alpha=0.6,
+                s=100  # Increase point size
+            )
+            
+            # Draw eps radius circles around points
+            for x, y in zip(X_pca[mask, 0], X_pca[mask, 1]):
+                circle = plt.Circle(
+                    (x, y), 
+                    eps/4,  # Scale down eps for better visualization
+                    color=color,
+                    fill=False,
+                    alpha=0.2,
+                    linestyle='--'
+                )
+                ax.add_artist(circle)
+        
+        # Customize plot
+        ax.set_title('Your Music Clusters', color='white', pad=20)
+        ax.set_xlabel('Principal Component 1', color='white')
+        ax.set_ylabel('Principal Component 2', color='white')
+        ax.tick_params(colors='white')
+        ax.spines['bottom'].set_color('white')
+        ax.spines['top'].set_color('white')
+        ax.spines['left'].set_color('white')
+        ax.spines['right'].set_color('white')
+        
+        # Adjust legend
+        legend = ax.legend(
+            bbox_to_anchor=(1.05, 1),
+            loc='upper left',
+            frameon=False
+        )
+        for text in legend.get_texts():
+            text.set_color('white')
+        
+        # Save plot to bytes
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', transparent=True, bbox_inches='tight', dpi=300)
+        buf.seek(0)
+        plt.close()
+        
+        # Convert to base64
+        plot_data = base64.b64encode(buf.getvalue()).decode('utf-8')
+        
+        # Convert numpy types to Python native types for JSON serialization
+        cluster_counts = Counter(clusters)
+        cluster_counts_dict = {int(k): int(v) for k, v in cluster_counts.items()}
+        
+        return jsonify({
+            "plot": plot_data,
+            "cluster_count": len(unique_clusters),
+            "songs_per_cluster": cluster_counts_dict,
+            "eps_radius": float(eps)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error generating visualization: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 

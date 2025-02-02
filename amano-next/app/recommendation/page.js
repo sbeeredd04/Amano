@@ -11,15 +11,23 @@ import { faHeart as farHeart } from '@fortawesome/free-regular-svg-icons';
 import { faThumbsDown as fasThumbsDown } from '@fortawesome/free-solid-svg-icons';
 import { faThumbsDown as farThumbsDown } from '@fortawesome/free-regular-svg-icons';
 import { faRotate } from '@fortawesome/free-solid-svg-icons';
+import Image from 'next/image';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://70bnmmdc-5000.usw3.devtunnels.ms/';
 
 const SongCard = ({ song, onLike, onDislike, feedbackStatus, onAddToPlaylist, isUserSong, isPopular }) => (
-  <div className={`bg-black/60 backdrop-blur-sm p-4 rounded-lg shadow-lg relative 
-    ${isUserSong ? 'border-2 border-green-500' : 'border border-white/10'}`}>
+  <div className={`bg-black/80 backdrop-blur-sm p-4 rounded-lg shadow-lg relative 
+    ${isUserSong ? 'border-2 border-green-500' : 
+      isPopular ? 'border border-red-500' : 
+      'border border-white/10'}`}>
     {isUserSong && (
       <div className="absolute top-2 left-2 bg-green-500/20 text-green-500 text-xs px-2 py-1 rounded-full">
         Your Playlist
+      </div>
+    )}
+    {isPopular && (
+      <div className="absolute top-2 left-2 bg-red-500/10 text-red-500 text-xs px-2 py-1 rounded-full">
+        Popular
       </div>
     )}
     
@@ -182,6 +190,8 @@ export default function RecommendationPage() {
   const [songs, setSongs] = useState([]);
   const [userSongs, setUserSongs] = useState([]);
   const [popularSongs, setPopularSongs] = useState([]);
+  const [clusterVisualization, setClusterVisualization] = useState(null);
+  const [clusterStats, setClusterStats] = useState(null);
 
   useEffect(() => {
     const userId = sessionStorage.getItem("user_id");
@@ -1019,6 +1029,42 @@ export default function RecommendationPage() {
     }
   };
 
+  const fetchClusterVisualization = async () => {
+    try {
+      const userId = sessionStorage.getItem("user_id");
+      if (!userId) return;
+
+      setMessage("Generating visualization...");
+      const response = await fetch(`${API_URL}/recommendation/visualize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId
+        })
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setClusterVisualization(data.plot);
+        setClusterStats(data);
+        setMessage("");
+      } else {
+        throw new Error(data.error || 'Failed to generate visualization');
+      }
+    } catch (error) {
+      console.error("Error generating visualization:", error);
+      setMessage(`Error: ${error.message}`);
+    }
+  };
+
+  useEffect(() => {
+    if (userId) {
+      fetchClusterVisualization();
+    }
+  }, [userId]);
+
   return (
     <div className="relative min-h-screen font-ubuntu-mono">
       <Vortex
@@ -1425,6 +1471,34 @@ export default function RecommendationPage() {
       {message && (
         <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-black/80 text-white px-6 py-3 rounded-full z-50">
           {message}
+        </div>
+      )}
+
+      {clusterVisualization && (
+        <div className="mt-12 p-6 bg-black/40 backdrop-blur-sm rounded-lg">
+          <h3 className="text-2xl font-semibold mb-6">Your Music Clusters</h3>
+          <div className="flex flex-col items-center">
+            <div className="relative w-full max-w-3xl aspect-[4/3] mb-4">
+              <Image
+                src={`data:image/png;base64,${clusterVisualization}`}
+                alt="Music Clusters Visualization"
+                fill
+                className="object-contain"
+                priority
+              />
+            </div>
+            {clusterStats && (
+              <div className="text-sm text-gray-400 space-y-2">
+                <p>Number of clusters: {clusterStats.cluster_count}</p>
+                <p>Songs per cluster: {
+                  Object.entries(clusterStats.songs_per_cluster)
+                    .map(([cluster, count]) => `Cluster ${cluster}: ${count} songs`)
+                    .join(', ')
+                }</p>
+                <p>Clustering radius: {clusterStats.eps_radius.toFixed(2)}</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
