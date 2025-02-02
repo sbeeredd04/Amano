@@ -1055,7 +1055,6 @@ export default function RecommendationPage() {
       const userId = sessionStorage.getItem("user_id");
       if (!userId) return;
 
-      setMessage("Generating visualization...");
       const response = await fetch(`${API_URL}/recommendation/visualize`, {
         method: 'POST',
         headers: {
@@ -1418,7 +1417,7 @@ export default function RecommendationPage() {
                 <div className="mb-12">
                   <h3 className="text-2xl font-semibold mb-6 flex items-center gap-2">
                     <span>Popular Songs</span>
-                    <span className="px-2 py-1 bg-red-500 text-white text-sm rounded-full">Hot</span>
+                    <span className="px-2 py-1 bg-purple-500 text-white text-sm rounded-full">Beta</span>
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                     {popularSongs.map((song, index) => (
